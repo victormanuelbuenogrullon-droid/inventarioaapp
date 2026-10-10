@@ -11,7 +11,8 @@ import {
   ListPlus, 
   Volume2, 
   VolumeX,
-  Sparkles
+  Sparkles,
+  RotateCcw
 } from 'lucide-react';
 import { findProduct } from '../utils/db';
 import { playSuccessBeep, playDoubleBeep, playErrorBeep } from '../utils/sound';
@@ -24,16 +25,21 @@ export default function CameraScannerModal({
   scanMode, // 'auto1' | 'askQty'
   setScanMode,
   soundEnabled,
-  setSoundEnabled
+  setSoundEnabled,
+  autoReopenCamera = true,
+  setAutoReopenCamera
 }) {
   const [cameras, setCameras] = useState([]);
-  const [selectedCameraId, setSelectedCameraId] = useState(null);
+  const [selectedCameraId, setSelectedCameraId] = useState(() => {
+    return localStorage.getItem('inventariosapp_preferred_cam_id') || null;
+  });
   const [isScanning, setIsScanning] = useState(false);
-  const [torchOn, setTorchOn] = useState(false);
+  const [torchOn, setTorchOn] = useState(() => {
+    return localStorage.getItem('inventariosapp_torch_enabled') === 'true';
+  });
   const [hasTorch, setHasTorch] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);
   const [recentScan, setRecentScan] = useState(null);
-  const [continuousMode, setContinuousMode] = useState(true);
 
   const scannerRef = useRef(null);
   const lastScannedCodeRef = useRef({ code: '', time: 0 });
@@ -73,13 +79,21 @@ export default function CameraScannerModal({
 
         setCameras(devices);
 
-        // Find back camera if available (labels like 'back', 'rear', 'trasera', 'environment')
+        // Check if there is a saved preferred camera ID that still exists
+        const savedCamId = localStorage.getItem('inventariosapp_preferred_cam_id');
+        const matchedSaved = devices.find(d => d.id === savedCamId);
+
+        // Otherwise find back/environment camera
         const backCam = devices.find(d => 
           /back|rear|environment|trasera|posterior/i.test(d.label)
         );
 
-        const targetCamId = backCam ? backCam.id : devices[devices.length - 1].id;
+        const targetCamId = matchedSaved 
+          ? matchedSaved.id 
+          : (backCam ? backCam.id : devices[devices.length - 1].id);
+
         setSelectedCameraId(targetCamId);
+        localStorage.setItem('inventariosapp_preferred_cam_id', targetCamId);
 
         startScanner(targetCamId);
       } catch (err) {
@@ -145,13 +159,23 @@ export default function CameraScannerModal({
 
       setIsScanning(true);
 
-      // Check if camera supports torch
+      // Check if camera supports torch and restore saved torch state
       try {
         const capabilities = html5QrCode.getRunningTrackCapabilities?.();
         if (capabilities && capabilities.torch) {
           setHasTorch(true);
+          const savedTorch = localStorage.getItem('inventariosapp_torch_enabled') === 'true';
+          if (savedTorch) {
+            await html5QrCode.applyVideoConstraints({
+              advanced: [{ torch: true }]
+            });
+            setTorchOn(true);
+          }
+        } else {
+          setHasTorch(false);
         }
       } catch (e) {
+        console.warn('Torch feature check warning:', e);
         setHasTorch(false);
       }
     } catch (err) {
@@ -175,7 +199,6 @@ export default function CameraScannerModal({
       } finally {
         scannerRef.current = null;
         setIsScanning(false);
-        setTorchOn(false);
       }
     }
   };
@@ -188,6 +211,7 @@ export default function CameraScannerModal({
         advanced: [{ torch: newStatus }]
       });
       setTorchOn(newStatus);
+      localStorage.setItem('inventariosapp_torch_enabled', newStatus ? 'true' : 'false');
     } catch (err) {
       console.warn('Error activando linterna:', err);
     }
@@ -199,6 +223,7 @@ export default function CameraScannerModal({
     const nextIndex = (currentIndex + 1) % cameras.length;
     const nextCam = cameras[nextIndex];
     setSelectedCameraId(nextCam.id);
+    localStorage.setItem('inventariosapp_preferred_cam_id', nextCam.id);
     startScanner(nextCam.id);
   };
 
@@ -237,13 +262,14 @@ export default function CameraScannerModal({
           time: new Date().toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
         });
 
-        onProductFound(product, scanMode);
+        // Pass isFromCamera = true so App knows to trigger auto-reopen if configured
+        onProductFound(product, scanMode, code, true);
 
-        if (!continuousMode || scanMode === 'askQty') {
-          // If asking quantity or not in continuous mode, close camera modal so user can enter qty
+        if (scanMode === 'askQty') {
+          // In "Pedir Cantidad" mode, close the camera modal so QuantityModal can open smoothly
           setTimeout(() => {
             onClose();
-          }, 300);
+          }, 200);
         }
       } else {
         if (soundEnabled) playErrorBeep();
@@ -254,19 +280,19 @@ export default function CameraScannerModal({
           time: new Date().toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
         });
 
-        onProductFound(null, scanMode, code);
+        onProductFound(null, scanMode, code, true);
       }
     } catch (err) {
       console.error('Error buscando código escaneado por cámara:', err);
     } finally {
       setTimeout(() => {
         isProcessingRef.current = false;
-      }, 500);
+      }, 400);
     }
   };
 
   const onScanFailure = () => {
-    // Normal frame scanning cycle, ignore
+    // Normal frame scanning cycle
   };
 
   if (!isOpen) return null;
@@ -284,9 +310,12 @@ export default function CameraScannerModal({
             <div>
               <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
                 <span>Escáner de Cámara</span>
-                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                  Móvil
-                </span>
+                {torchOn && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-0.5">
+                    <Zap className="w-2.5 h-2.5 fill-current" />
+                    Flash ON
+                  </span>
+                )}
               </h3>
               <p className="text-[11px] text-slate-400">
                 Apunta al código de barras del producto
@@ -356,7 +385,7 @@ export default function CameraScannerModal({
                     ? 'bg-amber-500 text-slate-950 border-amber-300 shadow-[0_0_15px_rgba(245,158,11,0.5)]'
                     : 'bg-black/60 text-white border-white/20 hover:bg-black/80'
                 }`}
-                title={torchOn ? 'Apagar linterna' : 'Encender linterna'}
+                title={torchOn ? 'Apagar linterna (se recordará apagada)' : 'Encender linterna (se mantendrá encendida)'}
               >
                 {torchOn ? <Zap className="w-4 h-4 fill-current" /> : <ZapOff className="w-4 h-4" />}
               </button>
@@ -368,7 +397,7 @@ export default function CameraScannerModal({
                 type="button"
                 onClick={handleSwitchCamera}
                 className="p-2.5 rounded-xl bg-black/60 text-white border border-white/20 hover:bg-black/80 backdrop-blur-md transition-all"
-                title="Cambiar cámara"
+                title="Cambiar cámara (se guardará tu selección)"
               >
                 <RefreshCw className="w-4 h-4" />
               </button>
@@ -395,7 +424,7 @@ export default function CameraScannerModal({
                   {recentScan.found ? (
                     <div>
                       <p className="font-bold text-white truncate">{recentScan.product.descripcion}</p>
-                      <p className="text-[10px] text-emerald-300/80">Código: {recentScan.code} • ¡Contado con éxito!</p>
+                      <p className="text-[10px] text-emerald-300/80">Código: {recentScan.code} • ¡Detectado con éxito!</p>
                     </div>
                   ) : (
                     <div>
@@ -436,7 +465,7 @@ export default function CameraScannerModal({
               }`}
             >
               <Sparkles className="w-3.5 h-3.5" />
-              <span>+1 Rápido Continuo</span>
+              <span>+1 Rápido</span>
             </button>
 
             <button
@@ -453,6 +482,27 @@ export default function CameraScannerModal({
             </button>
           </div>
 
+          {/* Auto-reopen toggle option */}
+          {setAutoReopenCamera && (
+            <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-950/70 border border-slate-800 text-xs text-slate-300">
+              <div className="flex items-center gap-2">
+                <RotateCcw className={`w-3.5 h-3.5 ${autoReopenCamera ? 'text-emerald-400' : 'text-slate-500'}`} />
+                <span>Reabrir cámara tras ingresar cantidad</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAutoReopenCamera(!autoReopenCamera)}
+                className={`px-2.5 py-1 rounded-lg font-bold text-[10px] transition-all uppercase ${
+                  autoReopenCamera
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'bg-slate-800 text-slate-400 hover:text-white'
+                }`}
+              >
+                {autoReopenCamera ? 'Activado' : 'Desactivado'}
+              </button>
+            </div>
+          )}
+
           <div className="flex items-center justify-between text-xs text-slate-400 pt-1">
             {/* Sound toggle button */}
             <button
@@ -461,7 +511,7 @@ export default function CameraScannerModal({
               className="flex items-center gap-1.5 text-slate-400 hover:text-white transition-colors"
             >
               {soundEnabled ? <Volume2 className="w-3.5 h-3.5 text-emerald-400" /> : <VolumeX className="w-3.5 h-3.5 text-slate-500" />}
-              <span>{soundEnabled ? 'Sonido activado' : 'Sonido apagado'}</span>
+              <span>{soundEnabled ? 'Sonido ON' : 'Sonido OFF'}</span>
             </button>
 
             <button

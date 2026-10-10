@@ -74,6 +74,18 @@ export default function App() {
     return localStorage.getItem(LOCAL_STORAGE_SCANMODE_KEY) || 'askQty';
   });
 
+  // Auto reopen camera mode (continuous inventory loop)
+  const [autoReopenCamera, setAutoReopenCamera] = useState(() => {
+    const saved = localStorage.getItem('inventariosapp_auto_reopen_cam');
+    return saved !== null ? JSON.parse(saved) : true;
+  });
+
+  useEffect(() => {
+    localStorage.setItem('inventariosapp_auto_reopen_cam', JSON.stringify(autoReopenCamera));
+  }, [autoReopenCamera]);
+
+  const isCameraScanRef = useRef(false);
+
   // Notifications & UI feedback
   const [lastScannedMessage, setLastScannedMessage] = useState(null);
 
@@ -85,6 +97,7 @@ export default function App() {
   const [isAuditorsModalOpen, setIsAuditorsModalOpen] = useState(false);
   const [isPrintOpen, setIsPrintOpen] = useState(false);
   const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false);
+
   
   // Generic / On-the-fly Product Modal state
   const [genericModalData, setGenericModalData] = useState({
@@ -409,7 +422,9 @@ export default function App() {
   }, [currentUserName]);
 
   // When a barcode is scanned
-  const handleProductFound = useCallback((product, currentScanMode, rawCode) => {
+  const handleProductFound = useCallback((product, currentScanMode, rawCode, isFromCamera = false) => {
+    isCameraScanRef.current = !!isFromCamera;
+
     if (!product) {
       setLastScannedMessage({
         type: 'error',
@@ -512,7 +527,16 @@ export default function App() {
       applyCountToItem(product, enteredQty, false);
     }
     setQuantityModalData({ isOpen: false, product: null, currentCount: 0, isEditing: false });
+
+    // If autoReopenCamera is active and scan came from camera, reopen camera immediately!
+    if (autoReopenCamera && isCameraScanRef.current) {
+      isCameraScanRef.current = false;
+      setTimeout(() => {
+        setIsCamScannerOpen(true);
+      }, 150);
+    }
   };
+
 
   // Edit item directly from table
   const handleEditItem = (item) => {
@@ -639,6 +663,8 @@ export default function App() {
               setScanMode={setScanMode}
               soundEnabled={soundEnabled}
               lastScannedMessage={lastScannedMessage}
+              autoReopenCamera={autoReopenCamera}
+              setAutoReopenCamera={setAutoReopenCamera}
             />
 
 
@@ -694,7 +720,10 @@ export default function App() {
         setScanMode={setScanMode}
         soundEnabled={soundEnabled}
         setSoundEnabled={setSoundEnabled}
+        autoReopenCamera={autoReopenCamera}
+        setAutoReopenCamera={setAutoReopenCamera}
       />
+
 
 
       <GenericProductModal
@@ -734,8 +763,14 @@ export default function App() {
         currentCount={quantityModalData.currentCount}
         isEditing={quantityModalData.isEditing}
         onConfirm={handleQuantityConfirm}
-        onClose={() => setQuantityModalData({ isOpen: false, product: null, currentCount: 0, isEditing: false })}
+        onClose={() => {
+          isCameraScanRef.current = false;
+          setQuantityModalData({ isOpen: false, product: null, currentCount: 0, isEditing: false });
+        }}
       />
+
+
+
 
       <ManualProductSearchModal
         isOpen={isManualSearchOpen}

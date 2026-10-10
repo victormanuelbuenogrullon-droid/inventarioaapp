@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Barcode, Search, Zap, ListPlus, CornerDownLeft, PlusCircle, Check, AlertCircle, Camera } from 'lucide-react';
+import { Barcode, Search, Zap, ListPlus, CornerDownLeft, PlusCircle, Check, AlertCircle, Camera, RotateCcw } from 'lucide-react';
 import { findProduct } from '../utils/db';
 import { playSuccessBeep, playDoubleBeep, playErrorBeep } from '../utils/sound';
 
@@ -11,11 +11,14 @@ export default function ScannerBar({
   scanMode, // 'auto1' | 'askQty'
   setScanMode,
   soundEnabled,
-  lastScannedMessage
+  lastScannedMessage,
+  autoReopenCamera = true,
+  setAutoReopenCamera
 }) {
   const [barcodeInput, setBarcodeInput] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const inputRef = useRef(null);
+
 
   // Auto focus input on mount only on non-touch desktop devices
   useEffect(() => {
@@ -119,6 +122,29 @@ export default function ScannerBar({
             <Camera className="w-4 h-4 text-white animate-pulse" />
             <span>📷 Cámara</span>
           </button>
+
+          {/* Auto-reopen Camera Switcher Button */}
+          {setAutoReopenCamera && (
+            <button
+              type="button"
+              onClick={() => setAutoReopenCamera(!autoReopenCamera)}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border transition-all active:scale-95 ${
+                autoReopenCamera
+                  ? 'bg-emerald-50 text-emerald-800 border-emerald-300 shadow-xs'
+                  : 'bg-slate-100 text-slate-500 border-slate-200 hover:text-slate-800'
+              }`}
+              title={autoReopenCamera ? 'Reapertura automática de cámara ACTIVADA tras ingresar cantidad' : 'Reapertura automática de cámara DESACTIVADA'}
+            >
+              <RotateCcw className={`w-3.5 h-3.5 ${autoReopenCamera ? 'text-emerald-600' : 'text-slate-400'}`} />
+              <span className="hidden sm:inline">Auto-reabrir:</span>
+              <span className={`px-1.5 py-0.2 text-[10px] rounded-full font-bold uppercase ${
+                autoReopenCamera ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-600'
+              }`}>
+                {autoReopenCamera ? 'ON' : 'OFF'}
+              </span>
+            </button>
+          )}
+
 
           {/* Mode Switcher */}
           <div className="bg-slate-100 p-1 rounded-xl border border-slate-200 flex items-center gap-1">
