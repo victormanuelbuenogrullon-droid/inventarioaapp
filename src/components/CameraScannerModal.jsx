@@ -420,11 +420,11 @@ export default function CameraScannerModal({
                 ) : (
                   <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
                 )}
-                <div className="truncate">
+                <div className="flex-1 min-w-0">
                   {recentScan.found ? (
                     <div>
-                      <p className="font-bold text-white truncate">{recentScan.product.descripcion}</p>
-                      <p className="text-[10px] text-emerald-300/80">Código: {recentScan.code} • ¡Detectado con éxito!</p>
+                      <p className="font-bold text-white text-xs sm:text-sm leading-snug break-words">{recentScan.product.descripcion}</p>
+                      <p className="text-[10px] text-emerald-300/80 mt-0.5">Código: {recentScan.code} • ¡Detectado con éxito!</p>
                     </div>
                   ) : (
                     <div>

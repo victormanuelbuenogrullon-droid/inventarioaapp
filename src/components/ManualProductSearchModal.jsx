@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, X, ArrowRight } from 'lucide-react';
+import { Search, X, ArrowRight, Tag, DollarSign } from 'lucide-react';
 import { searchProducts } from '../utils/db';
 import { formatCurrency } from '../utils/export';
 
@@ -32,7 +32,7 @@ export default function ManualProductSearchModal({
     const timer = setTimeout(async () => {
       setIsSearching(true);
       try {
-        const found = await searchProducts(searchTerm, 30);
+        const found = await searchProducts(searchTerm, 40);
         setResults(found);
         setSelectedIndex(0);
       } catch (err) {
@@ -40,7 +40,7 @@ export default function ManualProductSearchModal({
       } finally {
         setIsSearching(false);
       }
-    }, 150);
+    }, 100);
 
     return () => clearTimeout(timer);
   }, [searchTerm]);
@@ -65,42 +65,42 @@ export default function ManualProductSearchModal({
   return (
     <div
       onKeyDown={handleKeyDown}
-      className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-16 bg-slate-900/40 backdrop-blur-xs animate-in fade-in duration-150"
+      className="fixed inset-0 z-50 flex items-start justify-center p-2 sm:p-4 pt-2 sm:pt-14 bg-slate-900/50 backdrop-blur-xs animate-in fade-in duration-150"
     >
-      <div className="bg-white border border-slate-200 w-full max-w-2xl rounded-2xl shadow-xl overflow-hidden flex flex-col max-h-[80vh]">
+      <div className="bg-white border border-slate-200 w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh] sm:max-h-[85vh]">
         
         {/* Search header */}
-        <div className="p-4 border-b border-slate-100 flex items-center gap-3 bg-slate-50/60">
+        <div className="p-3.5 sm:p-4 border-b border-slate-100 flex items-center gap-3 bg-slate-50/80">
           <Search className="w-5 h-5 text-slate-400 shrink-0" />
           <input
             ref={inputRef}
             type="text"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Escribe el nombre del producto, marca o código para buscar en el catálogo..."
+            placeholder="Escribe el nombre del producto, marca o código..."
             className="w-full bg-transparent text-slate-900 placeholder-slate-400 text-sm sm:text-base focus:outline-none font-medium"
           />
           {searchTerm && (
             <button
               onClick={() => setSearchTerm('')}
-              className="text-xs text-slate-500 hover:text-slate-800 px-2 py-1 rounded bg-slate-200"
+              className="text-xs text-slate-500 hover:text-slate-800 px-2 py-1 rounded bg-slate-200 shrink-0"
             >
               Borrar
             </button>
           )}
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-700 p-1 rounded-lg hover:bg-slate-100 transition-colors"
+            className="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg hover:bg-slate-200 transition-colors shrink-0"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Results List */}
-        <div className="flex-1 overflow-y-auto p-2 divide-y divide-slate-100">
+        <div className="flex-1 overflow-y-auto p-2 sm:p-3 divide-y divide-slate-100 space-y-1">
           {isSearching && (
             <div className="p-8 text-center text-xs text-slate-400">
-              Buscando en más de 20,000 productos...
+              Buscando en más de 20,000 productos en memoria...
             </div>
           )}
 
@@ -123,49 +123,60 @@ export default function ManualProductSearchModal({
                 key={product.id || idx}
                 onClick={() => onSelectProduct(product)}
                 onMouseEnter={() => setSelectedIndex(idx)}
-                className={`p-3 rounded-xl cursor-pointer flex items-center justify-between gap-3 transition-colors ${
-                  isSelected ? 'bg-slate-100' : 'hover:bg-slate-50'
+                className={`p-3 sm:p-3.5 rounded-xl cursor-pointer transition-all border ${
+                  isSelected 
+                    ? 'bg-slate-100 border-slate-300 shadow-xs' 
+                    : 'bg-white border-transparent hover:bg-slate-50'
                 }`}
               >
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-slate-900 text-sm truncate">
-                      {product.descripcion}
-                    </span>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 font-bold shrink-0">
-                      {product.unidad || 'UNIDAD'}
-                    </span>
-                  </div>
+                {/* Top Row: Full complete description + Unit */}
+                <div className="flex items-start justify-between gap-2">
+                  <h4 className="font-bold text-slate-900 text-sm sm:text-base leading-snug break-words whitespace-normal flex-1">
+                    {product.descripcion}
+                  </h4>
+                  <span className="text-[10px] px-2 py-0.5 rounded-md bg-slate-200 text-slate-700 font-bold shrink-0 mt-0.5">
+                    {product.unidad || 'UNIDAD'}
+                  </span>
+                </div>
+
+                {/* Bottom Row: Code, Category, Costs, Prices & Select Action */}
+                <div className="flex flex-wrap items-center justify-between gap-2 mt-2 pt-2 border-t border-slate-100/80 text-xs">
                   
-                  <div className="flex items-center gap-3 mt-1 text-xs text-slate-500">
-                    <span className="font-mono text-slate-600">
+                  {/* Code & Category info */}
+                  <div className="flex items-center gap-2 flex-wrap text-slate-500">
+                    <span className="font-mono font-semibold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded text-[11px]">
                       {product.codigoInternacional || product.codigoInterno || product.codigo}
                     </span>
+                    {product.codigoInterno && product.codigoInterno !== product.codigoInternacional && (
+                      <span className="text-[11px] text-slate-400">SKU: {product.codigoInterno}</span>
+                    )}
                     {product.categoria && (
-                      <span>• {product.categoria}</span>
+                      <span className="text-[11px] text-slate-500">• {product.categoria}</span>
                     )}
                   </div>
-                </div>
 
-                <div className="text-right shrink-0">
-                  <div className="text-xs text-slate-500">
-                    Costo: <strong className="text-slate-800">{formatCurrency(product.costo)}</strong>
-                  </div>
-                  <div className="text-xs text-slate-500">
-                    Precio: <strong className="text-slate-800">{formatCurrency(product.precio)}</strong>
-                  </div>
-                </div>
+                  {/* Pricing & Selection button */}
+                  <div className="flex items-center gap-3 shrink-0 ml-auto">
+                    <div className="text-right text-xs">
+                      <span className="text-slate-400 mr-1">Costo:</span>
+                      <strong className="text-slate-700">{formatCurrency(product.costo)}</strong>
+                    </div>
+                    <div className="text-right text-xs">
+                      <span className="text-slate-400 mr-1">Precio:</span>
+                      <strong className="text-slate-900 font-bold">{formatCurrency(product.precio)}</strong>
+                    </div>
 
-                <div className="pl-2">
-                  <button
-                    className={`p-2 rounded-xl transition-all ${
-                      isSelected
-                        ? 'bg-slate-800 text-white shadow-xs'
-                        : 'bg-slate-100 text-slate-500'
-                    }`}
-                  >
-                    <ArrowRight className="w-4 h-4" />
-                  </button>
+                    <button
+                      className={`p-1.5 rounded-lg transition-all ${
+                        isSelected
+                          ? 'bg-slate-800 text-white shadow-xs'
+                          : 'bg-slate-100 text-slate-600'
+                      }`}
+                    >
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
                 </div>
 
               </div>
@@ -176,10 +187,10 @@ export default function ManualProductSearchModal({
         {/* Footer shortcuts */}
         <div className="p-3 bg-slate-50 border-t border-slate-100 text-xs text-slate-500 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <span>Usa <kbd className="px-1.5 py-0.5 rounded bg-white border border-slate-200 text-slate-700">↑</kbd> <kbd className="px-1.5 py-0.5 rounded bg-white border border-slate-200 text-slate-700">↓</kbd> para navegar</span>
-            <span><kbd className="px-1.5 py-0.5 rounded bg-white border border-slate-200 text-slate-700">Enter</kbd> para seleccionar</span>
+            <span className="hidden sm:inline">Usa <kbd className="px-1.5 py-0.5 rounded bg-white border border-slate-200 text-slate-700">↑</kbd> <kbd className="px-1.5 py-0.5 rounded bg-white border border-slate-200 text-slate-700">↓</kbd> para navegar</span>
+            <span><kbd className="px-1.5 py-0.5 rounded bg-white border border-slate-200 text-slate-700">Enter</kbd> o toca para seleccionar</span>
           </div>
-          <span><kbd className="px-1.5 py-0.5 rounded bg-white border border-slate-200 text-slate-700">Esc</kbd> para cerrar</span>
+          <span><kbd className="px-1.5 py-0.5 rounded bg-white border border-slate-200 text-slate-700">Esc</kbd> cerrar</span>
         </div>
 
       </div>

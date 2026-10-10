@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Search, 
   Edit3, 
@@ -11,7 +11,9 @@ import {
   ChevronsRight, 
   Database,
   RefreshCw,
-  ArrowLeft
+  ArrowLeft,
+  Tag,
+  DollarSign
 } from 'lucide-react';
 import { 
   getProductsPaged, 
@@ -28,6 +30,7 @@ export default function CatalogManagerView({
   onAddNewProduct,
   catalogCount
 }) {
+  const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('');
   const [categories, setCategories] = useState([]);
@@ -37,6 +40,15 @@ export default function CatalogManagerView({
   const [pageSize, setPageSize] = useState(25);
   const [totalPages, setTotalPages] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
+
+  // Debounce search input (180ms)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearch(searchInput);
+      setPage(1);
+    }, 180);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
 
   useEffect(() => {
     getAllCatalogCategories().then(setCategories);
@@ -64,11 +76,6 @@ export default function CatalogManagerView({
   useEffect(() => {
     loadData();
   }, [loadData]);
-
-  const handleSearchChange = (val) => {
-    setSearch(val);
-    setPage(1);
-  };
 
   const handleCategoryChange = (val) => {
     setCategory(val);
@@ -100,7 +107,7 @@ export default function CatalogManagerView({
         '#': idx + 1,
         'Código': item.codigo || '',
         'Código Interno': item.codigoInterno || '',
-        'Código Internacional (Barra)': item.codigoInternaciona || item.codigoInternacional || '',
+        'Código Internacional (Barra)': item.codigoInternacional || item.codigoInternaciona || '',
         'Descripción': item.descripcion || '',
         'Unidad': item.unidad || 'UNIDAD',
         'Categoría': item.categoria || '',
@@ -128,7 +135,7 @@ export default function CatalogManagerView({
         <div className="flex items-center gap-3">
           <button
             onClick={onBackToInventory}
-            className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition-all flex items-center gap-1.5 text-xs font-semibold"
+            className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition-all flex items-center gap-1.5 text-xs font-semibold active:scale-95"
           >
             <ArrowLeft className="w-4 h-4" />
             <span>Volver al Pase</span>
@@ -142,7 +149,7 @@ export default function CatalogManagerView({
               </span>
             </h2>
             <p className="text-xs text-slate-500">
-              Consulta, busca y edita descripciones, unidades, costos y precios de tu base de datos
+              Búsqueda ultrarrápida en memoria RAM • Modifica o consulta más de 20,000 productos
             </p>
           </div>
         </div>
@@ -150,7 +157,7 @@ export default function CatalogManagerView({
         <div className="flex items-center gap-2">
           <button
             onClick={onAddNewProduct}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold shadow-sm transition-all"
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold shadow-sm transition-all active:scale-95"
           >
             <Plus className="w-4 h-4" />
             <span>+ Nuevo Producto</span>
@@ -168,22 +175,22 @@ export default function CatalogManagerView({
       </div>
 
       {/* Filter Bar */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col md:flex-row items-center gap-3">
+      <div className="bg-white border border-slate-200 rounded-2xl p-3 sm:p-4 shadow-sm flex flex-col md:flex-row items-center gap-3">
         
         {/* Search Input */}
         <div className="relative flex-1 w-full">
           <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
             type="text"
-            value={search}
-            onChange={(e) => handleSearchChange(e.target.value)}
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
             placeholder="Buscar por descripción, código de barra (EAN), SKU o categoría..."
-            className="w-full pl-10 pr-8 py-2 bg-slate-50 text-slate-900 placeholder-slate-400 rounded-xl border border-slate-300 focus:border-slate-800 focus:outline-none text-xs sm:text-sm font-medium"
+            className="w-full pl-10 pr-8 py-2.5 bg-slate-50 text-slate-900 placeholder-slate-400 rounded-xl border border-slate-300 focus:border-slate-800 focus:ring-2 focus:ring-slate-200 focus:outline-none text-xs sm:text-sm font-medium transition-all"
           />
-          {search && (
+          {searchInput && (
             <button
-              onClick={() => handleSearchChange('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 text-xs"
+              onClick={() => setSearchInput('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 text-xs p-1"
             >
               ✕
             </button>
@@ -195,7 +202,7 @@ export default function CatalogManagerView({
           <select
             value={category}
             onChange={(e) => handleCategoryChange(e.target.value)}
-            className="w-full px-3.5 py-2 bg-slate-50 text-slate-800 rounded-xl border border-slate-300 focus:border-slate-800 focus:outline-none text-xs font-medium"
+            className="w-full px-3.5 py-2.5 bg-slate-50 text-slate-800 rounded-xl border border-slate-300 focus:border-slate-800 focus:outline-none text-xs font-medium"
           >
             <option value="">Todas las Categorías ({categories.length})</option>
             {categories.map((c) => (
@@ -205,7 +212,7 @@ export default function CatalogManagerView({
         </div>
 
         {/* Page Size Selector */}
-        <div className="flex items-center gap-1.5 shrink-0 text-xs text-slate-500">
+        <div className="flex items-center gap-1.5 shrink-0 text-xs text-slate-500 self-end md:self-center">
           <span>Mostrar:</span>
           <select
             value={pageSize}
@@ -224,8 +231,82 @@ export default function CatalogManagerView({
 
       </div>
 
-      {/* Catalog Table */}
-      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+      {/* MOBILE CARD VIEW (for small screens md:hidden) */}
+      <div className="block md:hidden space-y-3">
+        {isLoading ? (
+          <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center text-slate-500">
+            <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-slate-400" />
+            Cargando catálogo...
+          </div>
+        ) : products.length === 0 ? (
+          <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center text-slate-400 text-xs">
+            No se encontraron productos con los filtros especificados.
+          </div>
+        ) : (
+          products.map((p, idx) => {
+            const globalIdx = (page - 1) * pageSize + idx + 1;
+            return (
+              <div
+                key={p.id || idx}
+                className="bg-white border border-slate-200 rounded-2xl p-3.5 shadow-sm space-y-2.5"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-bold">
+                        #{globalIdx}
+                      </span>
+                      <span className="font-mono text-xs font-semibold text-slate-700">
+                        {p.codigoInternacional || p.codigoInterno || p.codigo}
+                      </span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-bold">
+                        {p.unidad || 'UNIDAD'}
+                      </span>
+                    </div>
+                    <h3 className="font-bold text-slate-900 text-sm mt-1 leading-snug">
+                      {p.descripcion}
+                    </h3>
+                  </div>
+
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      onClick={() => onEditProduct(p)}
+                      className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors"
+                      title="Editar producto"
+                    >
+                      <Edit3 className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(p)}
+                      className="p-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 transition-colors"
+                      title="Eliminar producto"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-100">
+                  <div className="text-slate-500 truncate max-w-[50%]">
+                    {p.categoria || 'Sin categoría'}
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-slate-500">
+                      Costo: <strong className="text-slate-700">{formatCurrency(p.costo)}</strong>
+                    </span>
+                    <span className="text-slate-500">
+                      Precio: <strong className="text-slate-900 font-bold">{formatCurrency(p.precio)}</strong>
+                    </span>
+                  </div>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {/* DESKTOP CATALOG TABLE (hidden md:block) */}
+      <div className="hidden md:block bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
@@ -324,54 +405,53 @@ export default function CatalogManagerView({
             </tbody>
           </table>
         </div>
+      </div>
 
-        {/* Pagination Bar */}
-        <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
-          <div>
-            Mostrando página <strong className="text-slate-800">{page}</strong> de <strong className="text-slate-800">{totalPages}</strong> ({total.toLocaleString()} productos)
-          </div>
-
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => setPage(1)}
-              disabled={page === 1}
-              className="p-1.5 rounded-lg bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 disabled:opacity-40 disabled:cursor-not-allowed"
-              title="Primera página"
-            >
-              <ChevronsLeft className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page === 1}
-              className="px-2.5 py-1.5 rounded-lg bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 font-medium"
-            >
-              <ChevronLeft className="w-3.5 h-3.5" />
-              <span>Anterior</span>
-            </button>
-
-            <span className="px-3 py-1.5 bg-slate-200 rounded-lg text-slate-800 font-bold">
-              {page}
-            </span>
-
-            <button
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={page === totalPages || totalPages === 0}
-              className="px-2.5 py-1.5 rounded-lg bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 font-medium"
-            >
-              <span>Siguiente</span>
-              <ChevronRight className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={() => setPage(totalPages)}
-              disabled={page === totalPages || totalPages === 0}
-              className="p-1.5 rounded-lg bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 disabled:opacity-40 disabled:cursor-not-allowed"
-              title="Última página"
-            >
-              <ChevronsRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
+      {/* Pagination Bar */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
+        <div>
+          Mostrando <strong className="text-slate-800">{products.length}</strong> de <strong className="text-slate-800">{total.toLocaleString()}</strong> productos
         </div>
 
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => setPage(1)}
+            disabled={page === 1}
+            className="p-1.5 rounded-lg bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 disabled:opacity-40 disabled:cursor-not-allowed"
+            title="Primera página"
+          >
+            <ChevronsLeft className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={page === 1}
+            className="px-2.5 py-1.5 rounded-lg bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 font-medium"
+          >
+            <ChevronLeft className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Anterior</span>
+          </button>
+
+          <span className="px-3 py-1.5 bg-slate-200 rounded-lg text-slate-800 font-bold">
+            {page} / {totalPages}
+          </span>
+
+          <button
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            disabled={page === totalPages || totalPages === 0}
+            className="px-2.5 py-1.5 rounded-lg bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 font-medium"
+          >
+            <span className="hidden sm:inline">Siguiente</span>
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => setPage(totalPages)}
+            disabled={page === totalPages || totalPages === 0}
+            className="p-1.5 rounded-lg bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 disabled:opacity-40 disabled:cursor-not-allowed"
+            title="Última página"
+          >
+            <ChevronsRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
 
     </div>

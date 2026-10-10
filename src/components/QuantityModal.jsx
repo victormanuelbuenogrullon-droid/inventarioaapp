@@ -70,7 +70,7 @@ export default function QuantityModal({
               <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
                 {isEditing ? 'Modificar Conteo' : 'Ingresar Cantidad Contada'}
               </span>
-              <h3 className="text-base font-bold text-slate-900 leading-tight truncate max-w-[320px]">
+              <h3 className="text-sm sm:text-base font-bold text-slate-900 leading-snug break-words whitespace-normal">
                 {product.descripcion}
               </h3>
             </div>

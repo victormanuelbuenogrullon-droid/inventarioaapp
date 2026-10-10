@@ -124,3 +124,11 @@ export function emitSetAuditorName(name) {
     s.emit('user:setName', name);
   }
 }
+
+export function emitHistoryClear() {
+  const s = getSocket();
+  if (s && s.connected) {
+    s.emit('history:clear');
+  }
+}
+

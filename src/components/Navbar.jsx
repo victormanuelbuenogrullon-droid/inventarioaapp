@@ -12,13 +12,15 @@ import {
   ClipboardList,
   Users,
   Wifi,
-  WifiOff
+  WifiOff,
+  History
 } from 'lucide-react';
 
 export default function Navbar({
   activeView,
   setActiveView,
   catalogCount,
+  totalHistoryLogs = 0,
   onOpenUploader,
   onOpenSessionManager,
   onOpenPrint,
@@ -86,11 +88,11 @@ export default function Navbar({
         </div>
 
         {/* Center: Main View Navigation Switcher */}
-        <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200">
+        <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 overflow-x-auto max-w-full">
           <button
             type="button"
             onClick={() => setActiveView('inventory')}
-            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all shrink-0 ${
               activeView === 'inventory'
                 ? 'bg-white text-slate-900 shadow-sm'
                 : 'text-slate-600 hover:text-slate-900'
@@ -108,7 +110,7 @@ export default function Navbar({
           <button
             type="button"
             onClick={() => setActiveView('catalog')}
-            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all shrink-0 ${
               activeView === 'catalog'
                 ? 'bg-white text-slate-900 shadow-sm'
                 : 'text-slate-600 hover:text-slate-900'
@@ -122,7 +124,26 @@ export default function Navbar({
               </span>
             )}
           </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveView('history')}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all shrink-0 ${
+              activeView === 'history'
+                ? 'bg-white text-slate-900 shadow-sm'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <History className="w-4 h-4 text-slate-600" />
+            <span>Historial</span>
+            {totalHistoryLogs > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full bg-slate-200 text-slate-800 text-[10px] font-bold">
+                {totalHistoryLogs}
+              </span>
+            )}
+          </button>
         </div>
+
 
         {/* Right Actions */}
         <div className="flex items-center gap-2">

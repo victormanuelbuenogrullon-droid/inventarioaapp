@@ -172,3 +172,70 @@ export function exportToCSV(items, sessionName = 'Pase_Inventario') {
   link.click();
   document.body.removeChild(link);
 }
+
+/**
+ * Export audit history logs to Excel (.xlsx)
+ */
+export function exportHistoryToExcel(logs, sessionName = 'Historial_Conteos') {
+  if (!logs || logs.length === 0) {
+    alert('No hay registros en el historial para exportar.');
+    return;
+  }
+
+  const dataRows = logs.map((log, index) => {
+    const qty = Number(log.cantidad) || 0;
+    const cost = Number(log.costo) || 0;
+    const price = Number(log.precio) || 0;
+    const itemTotalCost = qty * cost;
+    const itemTotalPrice = qty * price;
+
+    let actionLabel = 'Nuevo Conteo';
+    if (log.action === 'add') actionLabel = 'Suma (+N)';
+    else if (log.action === 'set') actionLabel = 'Cantidad Exacta';
+    else if (log.action === 'delete') actionLabel = 'Eliminación';
+
+    return {
+      '#': index + 1,
+      'Fecha / Hora': log.timestamp ? new Date(log.timestamp).toLocaleString('es-DO') : '',
+      'Estación / Auditor': log.stationName || 'Auditor',
+      'Acción': actionLabel,
+      'Código Barra / SKU': log.codigo || log.codigoInterno || '',
+      'Descripción del Producto': log.descripcion || '',
+      'Unidad': log.unidad || 'UNIDAD',
+      'Categoría': log.categoria || '',
+      'Cantidad Registrada': qty,
+      'Cantidad Resultante': log.cantidadResultado !== undefined ? log.cantidadResultado : qty,
+      'Costo Unitario ($)': cost,
+      'Inversión ($)': itemTotalCost,
+      'Precio Unitario ($)': price,
+      'Venta ($)': itemTotalPrice
+    };
+  });
+
+  const ws = XLSX.utils.json_to_sheet(dataRows);
+
+  ws['!cols'] = [
+    { wch: 5 },   // #
+    { wch: 22 },  // Fecha / Hora
+    { wch: 22 },  // Estación / Auditor
+    { wch: 18 },  // Acción
+    { wch: 18 },  // Código Barra
+    { wch: 45 },  // Descripción
+    { wch: 10 },  // Unidad
+    { wch: 18 },  // Categoría
+    { wch: 18 },  // Cantidad Registrada
+    { wch: 18 },  // Cantidad Resultante
+    { wch: 16 },  // Costo
+    { wch: 16 },  // Inversión
+    { wch: 16 },  // Precio
+    { wch: 16 }   // Venta
+  ];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Historial de Conteos');
+
+  const nowStr = new Date().toISOString().slice(0, 10);
+  const cleanName = (sessionName || 'Historial_Conteos').replace(/[^a-zA-Z0-9_-]/g, '_');
+  XLSX.writeFile(wb, `${cleanName}_${nowStr}.xlsx`);
+}
+

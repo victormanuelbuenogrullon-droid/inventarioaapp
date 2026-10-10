@@ -15,7 +15,8 @@ import CsvUploaderModal from './components/CsvUploaderModal';
 import PrintReportModal from './components/PrintReportModal';
 import ClearConfirmModal from './components/ClearConfirmModal';
 import CameraScannerModal from './components/CameraScannerModal';
-import { getCatalogCount, saveProductsInBatches, saveSingleProduct, updateProductInDB } from './utils/db';
+import HistoryLogView from './components/HistoryLogView';
+import { getCatalogCount, saveProductsInBatches, saveSingleProduct, updateProductInDB, initMemoryCache } from './utils/db';
 import { exportToExcel } from './utils/export';
 import { 
   getSocket, 
@@ -26,9 +27,11 @@ import {
   emitSessionRestore, 
   emitCatalogProductUpdated, 
   emitSetAuditorName,
+  emitHistoryClear,
   fetchCatalogFromServer,
   fetchCatalogMeta
 } from './utils/socket';
+
 import { playSuccessBeep } from './utils/sound';
 
 const LOCAL_STORAGE_KEY = 'inventariosapp_counted_items_v1';
@@ -64,6 +67,25 @@ export default function App() {
       return [];
     }
   });
+
+  // Audit History Logs
+  const [historyLogs, setHistoryLogs] = useState(() => {
+    try {
+      const saved = localStorage.getItem('inventariosapp_history_logs_v1');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('inventariosapp_history_logs_v1', JSON.stringify(historyLogs.slice(0, 2000)));
+    } catch (e) {
+      console.warn('LocalStorage history save error:', e);
+    }
+  }, [historyLogs]);
+
 
   const [soundEnabled, setSoundEnabled] = useState(() => {
     const saved = localStorage.getItem(LOCAL_STORAGE_SOUND_KEY);
@@ -157,6 +179,9 @@ export default function App() {
   // Load catalog count on startup & check server
   useEffect(() => {
     (async () => {
+      // Warm up memory cache in background
+      initMemoryCache().catch(console.warn);
+
       const localCount = await getCatalogCount();
       setCatalogCount(localCount);
 
@@ -226,6 +251,9 @@ export default function App() {
           setCountedItems(data.countedItems);
         }
       }
+      if (Array.isArray(data.historyLogs)) {
+        setHistoryLogs(data.historyLogs);
+      }
       if (data.totalUsers) setOnlineUsers(data.totalUsers);
       if (data.auditors) setAuditorsList(data.auditors);
 
@@ -247,6 +275,11 @@ export default function App() {
       if (data.allCountedItems) {
         setCountedItems(data.allCountedItems);
       }
+      if (data.historyLogs) {
+        setHistoryLogs(data.historyLogs);
+      } else if (data.log) {
+        setHistoryLogs(prev => [data.log, ...prev]);
+      }
       const timeStr = new Date().toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
       setLastScannedMessage({
         type: 'success',
@@ -264,6 +297,11 @@ export default function App() {
       } else if (data.key) {
         setCountedItems((prev) => prev.filter((it) => getItemKey(it) !== data.key));
       }
+      if (data.historyLogs) {
+        setHistoryLogs(data.historyLogs);
+      } else if (data.log) {
+        setHistoryLogs(prev => [data.log, ...prev]);
+      }
       const timeStr = new Date().toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
       setLastScannedMessage({
         type: 'info',
@@ -278,6 +316,16 @@ export default function App() {
       setLastScannedMessage({
         type: 'info',
         text: `⚠️ El listado fue reiniciado por ${data.by || 'un usuario'}.`,
+        time: timeStr
+      });
+    };
+
+    const handleHistoryCleared = (data) => {
+      setHistoryLogs([]);
+      const timeStr = new Date().toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      setLastScannedMessage({
+        type: 'info',
+        text: `🧹 El historial fue reiniciado por ${data?.by || 'un usuario'}.`,
         time: timeStr
       });
     };
@@ -325,6 +373,7 @@ export default function App() {
     socket.on('count:updated', handleCountUpdated);
     socket.on('item:deleted', handleItemDeleted);
     socket.on('inventory:cleared', handleInventoryCleared);
+    socket.on('history:cleared', handleHistoryCleared);
     socket.on('session:renamed', handleSessionRenamed);
     socket.on('session:restored', handleSessionRestored);
     socket.on('catalog:syncedProduct', handleCatalogSyncedProduct);
@@ -342,11 +391,13 @@ export default function App() {
       socket.off('count:updated', handleCountUpdated);
       socket.off('item:deleted', handleItemDeleted);
       socket.off('inventory:cleared', handleInventoryCleared);
+      socket.off('history:cleared', handleHistoryCleared);
       socket.off('session:renamed', handleSessionRenamed);
       socket.off('session:restored', handleSessionRestored);
       socket.off('catalog:syncedProduct', handleCatalogSyncedProduct);
       socket.off('catalog:updated', handleCatalogUpdated);
     };
+
   }, [currentUserName, syncCatalogFromServer]);
 
   // Product Key helper (matches by barcode, SKU, or ID)
@@ -631,6 +682,7 @@ export default function App() {
         activeView={activeView}
         setActiveView={setActiveView}
         catalogCount={catalogCount}
+        totalHistoryLogs={historyLogs.length}
         onOpenUploader={() => setIsUploaderOpen(true)}
         onOpenSessionManager={() => setIsSessionManagerOpen(true)}
         onOpenPrint={() => setIsPrintOpen(true)}
@@ -693,7 +745,21 @@ export default function App() {
           />
         )}
 
+        {/* VIEW 3: HISTORIAL Y AUDITORIA DE CONTEOS */}
+        {activeView === 'history' && (
+          <HistoryLogView
+            historyLogs={historyLogs}
+            onBackToInventory={() => setActiveView('inventory')}
+            onClearHistory={() => {
+              emitHistoryClear();
+              setHistoryLogs([]);
+            }}
+            sessionName={sessionName}
+          />
+        )}
+
       </main>
+
 
       {/* Footer */}
       <footer className="no-print border-t border-slate-200 py-3 text-center text-xs text-slate-500 bg-white">

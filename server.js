@@ -36,6 +36,7 @@ const CATALOG_FILE = path.join(DATA_DIR, 'catalog.json');
 let sharedState = {
   sessionName: 'Pase de Inventario General',
   countedItems: [],
+  historyLogs: [],
   lastUpdated: new Date().toISOString()
 };
 
@@ -47,13 +48,17 @@ try {
     const raw = fs.readFileSync(STATE_FILE, 'utf-8');
     const parsed = JSON.parse(raw);
     if (parsed && Array.isArray(parsed.countedItems)) {
-      sharedState = parsed;
-      console.log(`[Storage] Estado cargado desde disco: ${sharedState.countedItems.length} productos contados.`);
+      sharedState.sessionName = parsed.sessionName || 'Pase de Inventario General';
+      sharedState.countedItems = parsed.countedItems || [];
+      sharedState.historyLogs = Array.isArray(parsed.historyLogs) ? parsed.historyLogs : [];
+      sharedState.lastUpdated = parsed.lastUpdated || new Date().toISOString();
+      console.log(`[Storage] Estado cargado desde disco: ${sharedState.countedItems.length} productos contados, ${sharedState.historyLogs.length} registros en historial.`);
     }
   }
 } catch (err) {
   console.error('[Storage] Error al leer archivo de estado:', err);
 }
+
 
 // Load saved catalog from disk if exists
 try {
@@ -143,6 +148,11 @@ app.post('/api/catalog/upload', (req, res) => {
   res.status(400).json({ error: 'Formato de productos inválido' });
 });
 
+// Get entire shared history logs
+app.get('/api/history', (req, res) => {
+  res.json(sharedState.historyLogs || []);
+});
+
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({
@@ -150,6 +160,7 @@ app.get('/api/health', (req, res) => {
     sessionName: sharedState.sessionName,
     totalCounted: sharedState.countedItems.length,
     catalogCount: sharedCatalog.length,
+    totalLogs: (sharedState.historyLogs || []).length,
     onlineUsers: connectedAuditors.size
   });
 });
@@ -168,10 +179,11 @@ io.on('connection', (socket) => {
 
   console.log(`[Socket] Conectado: ${socket.id} (${connectedAuditors.size} usuarios en línea)`);
 
-  // 1. Send initial shared state AND catalog count to the newly connected user
+  // 1. Send initial shared state AND history logs to the newly connected user
   socket.emit('sync:init', {
     sessionName: sharedState.sessionName,
     countedItems: sharedState.countedItems,
+    historyLogs: sharedState.historyLogs || [],
     catalogCount: sharedCatalog.length,
     auditors: getAuditorsList(),
     totalUsers: connectedAuditors.size
@@ -204,15 +216,39 @@ io.on('connection', (socket) => {
     const now = Date.now();
 
     const existingIndex = sharedState.countedItems.findIndex((it) => getItemKey(it) === key);
+    let finalQty = qty;
+    let actionType = 'new';
 
     if (existingIndex >= 0) {
       const existing = sharedState.countedItems[existingIndex];
       const newQty = isSettingExact ? qty : (Number(existing.cantidadContada) || 0) + qty;
+      finalQty = newQty;
+      actionType = isSettingExact ? 'set' : 'add';
 
       if (newQty <= 0) {
         sharedState.countedItems.splice(existingIndex, 1);
+        
+        // Log deletion
+        const deleteLog = {
+          id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          stationName: auditorName,
+          codigo: product.codigoInternacional || product.codigoInterno || product.codigo || '',
+          codigoInterno: product.codigoInterno || '',
+          descripcion: product.descripcion || 'Producto eliminado',
+          unidad: product.unidad || 'UNIDAD',
+          categoria: product.categoria || '',
+          cantidad: 0,
+          action: 'delete',
+          cantidadResultado: 0,
+          costo: Number(product.costo) || 0,
+          precio: Number(product.precio) || 0,
+          timestamp: new Date().toISOString()
+        };
+        if (!Array.isArray(sharedState.historyLogs)) sharedState.historyLogs = [];
+        sharedState.historyLogs.unshift(deleteLog);
+
         persistStateToDisk();
-        io.emit('item:deleted', { key, by: auditorName });
+        io.emit('item:deleted', { key, by: auditorName, log: deleteLog, historyLogs: sharedState.historyLogs });
         return;
       } else {
         const updatedItem = {
@@ -229,14 +265,40 @@ io.on('connection', (socket) => {
 
         sharedState.countedItems.splice(existingIndex, 1);
         sharedState.countedItems.unshift(updatedItem);
+
+        // Record history log
+        const logEntry = {
+          id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          stationName: auditorName,
+          codigo: product.codigoInternacional || product.codigoInterno || product.codigo || '',
+          codigoInterno: product.codigoInterno || '',
+          descripcion: product.descripcion || existing.descripcion || 'Sin descripción',
+          unidad: product.unidad || existing.unidad || 'UNIDAD',
+          categoria: product.categoria || existing.categoria || '',
+          cantidad: qty,
+          action: actionType,
+          cantidadResultado: newQty,
+          costo: Number(product.costo) !== undefined ? Number(product.costo) : (Number(existing.costo) || 0),
+          precio: Number(product.precio) !== undefined ? Number(product.precio) : (Number(existing.precio) || 0),
+          timestamp: new Date().toISOString()
+        };
+
+        if (!Array.isArray(sharedState.historyLogs)) sharedState.historyLogs = [];
+        sharedState.historyLogs.unshift(logEntry);
+        if (sharedState.historyLogs.length > 5000) {
+          sharedState.historyLogs = sharedState.historyLogs.slice(0, 5000);
+        }
+
         persistStateToDisk();
 
         // Broadcast update to ALL connected clients
         io.emit('count:updated', {
           item: updatedItem,
           allCountedItems: sharedState.countedItems,
-          action: isSettingExact ? 'set' : 'add',
+          action: actionType,
           qtyChange: qty,
+          log: logEntry,
+          historyLogs: sharedState.historyLogs,
           by: auditorName
         });
       }
@@ -259,6 +321,30 @@ io.on('connection', (socket) => {
         };
 
         sharedState.countedItems.unshift(newItem);
+
+        // Record history log
+        const logEntry = {
+          id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          stationName: auditorName,
+          codigo: product.codigoInternacional || product.codigoInterno || product.codigo || '',
+          codigoInterno: product.codigoInterno || '',
+          descripcion: product.descripcion || 'Sin descripción',
+          unidad: product.unidad || 'UNIDAD',
+          categoria: product.categoria || '',
+          cantidad: qty,
+          action: 'new',
+          cantidadResultado: qty,
+          costo: Number(product.costo) || 0,
+          precio: Number(product.precio) || 0,
+          timestamp: new Date().toISOString()
+        };
+
+        if (!Array.isArray(sharedState.historyLogs)) sharedState.historyLogs = [];
+        sharedState.historyLogs.unshift(logEntry);
+        if (sharedState.historyLogs.length > 5000) {
+          sharedState.historyLogs = sharedState.historyLogs.slice(0, 5000);
+        }
+
         persistStateToDisk();
 
         io.emit('count:updated', {
@@ -266,6 +352,8 @@ io.on('connection', (socket) => {
           allCountedItems: sharedState.countedItems,
           action: 'new',
           qtyChange: qty,
+          log: logEntry,
+          historyLogs: sharedState.historyLogs,
           by: auditorName
         });
       }
@@ -277,8 +365,27 @@ io.on('connection', (socket) => {
     const key = getItemKey(product);
     const auditorName = connectedAuditors.get(socket.id)?.name || 'Un usuario';
     sharedState.countedItems = sharedState.countedItems.filter((it) => getItemKey(it) !== key);
+    
+    const deleteLog = {
+      id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      stationName: auditorName,
+      codigo: product.codigoInternacional || product.codigoInterno || product.codigo || '',
+      codigoInterno: product.codigoInterno || '',
+      descripcion: product.descripcion || 'Producto eliminado',
+      unidad: product.unidad || 'UNIDAD',
+      categoria: product.categoria || '',
+      cantidad: 0,
+      action: 'delete',
+      cantidadResultado: 0,
+      costo: Number(product.costo) || 0,
+      precio: Number(product.precio) || 0,
+      timestamp: new Date().toISOString()
+    };
+    if (!Array.isArray(sharedState.historyLogs)) sharedState.historyLogs = [];
+    sharedState.historyLogs.unshift(deleteLog);
+
     persistStateToDisk();
-    io.emit('item:deleted', { key, allCountedItems: sharedState.countedItems, by: auditorName });
+    io.emit('item:deleted', { key, allCountedItems: sharedState.countedItems, log: deleteLog, historyLogs: sharedState.historyLogs, by: auditorName });
   });
 
   // 5. Clear count
@@ -288,6 +395,15 @@ io.on('connection', (socket) => {
     persistStateToDisk();
     io.emit('inventory:cleared', { by: auditorName });
   });
+
+  // Clear history logs
+  socket.on('history:clear', () => {
+    const auditorName = connectedAuditors.get(socket.id)?.name || 'Un usuario';
+    sharedState.historyLogs = [];
+    persistStateToDisk();
+    io.emit('history:cleared', { by: auditorName });
+  });
+
 
   // 6. Rename session
   socket.on('session:rename', (newName) => {
