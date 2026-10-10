@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Loader2 } from 'lucide-react';
 import Navbar from './components/Navbar';
 import ScannerBar from './components/ScannerBar';
 import SummaryCards from './components/SummaryCards';
@@ -13,7 +14,7 @@ import AuditorsModal from './components/AuditorsModal';
 import CsvUploaderModal from './components/CsvUploaderModal';
 import PrintReportModal from './components/PrintReportModal';
 import ClearConfirmModal from './components/ClearConfirmModal';
-import { getCatalogCount, saveSingleProduct, updateProductInDB } from './utils/db';
+import { getCatalogCount, saveProductsInBatches, saveSingleProduct, updateProductInDB } from './utils/db';
 import { exportToExcel } from './utils/export';
 import { 
   getSocket, 
@@ -23,7 +24,9 @@ import {
   emitSessionRename, 
   emitSessionRestore, 
   emitCatalogProductUpdated, 
-  emitSetAuditorName 
+  emitSetAuditorName,
+  fetchCatalogFromServer,
+  fetchCatalogMeta
 } from './utils/socket';
 import { playSuccessBeep } from './utils/sound';
 
@@ -47,6 +50,8 @@ export default function App() {
 
   // Main State
   const [catalogCount, setCatalogCount] = useState(0);
+  const [isCatalogSyncing, setIsCatalogSyncing] = useState(false);
+  const [catalogSyncProgress, setCatalogSyncProgress] = useState({ current: 0, total: 0 });
   const [sessionName, setSessionName] = useState(() => {
     return localStorage.getItem(LOCAL_STORAGE_SESSION_KEY) || 'Pase de Inventario General';
   });
@@ -105,15 +110,59 @@ export default function App() {
     soundEnabledRef.current = soundEnabled;
   }, [soundEnabled]);
 
-  // Load catalog count on startup
+  // Sincronizar catálogo desde el servidor a IndexedDB local
+  const syncCatalogFromServer = useCallback(async (expectedTotal = 0) => {
+    try {
+      setIsCatalogSyncing(true);
+      setCatalogSyncProgress({ current: 0, total: expectedTotal || 0 });
+      
+      const products = await fetchCatalogFromServer();
+      if (Array.isArray(products) && products.length > 0) {
+        await saveProductsInBatches(products, (current, total) => {
+          setCatalogSyncProgress({ current, total });
+        });
+        const newCount = await getCatalogCount();
+        setCatalogCount(newCount);
+        setIsUploaderOpen(false);
+        
+        const timeStr = new Date().toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        setLastScannedMessage({
+          type: 'success',
+          text: `📦 Catálogo sincronizado con éxito (${products.length.toLocaleString()} productos disponibles).`,
+          time: timeStr
+        });
+      }
+    } catch (err) {
+      console.warn('Error al sincronizar catálogo con servidor:', err);
+    } finally {
+      setIsCatalogSyncing(false);
+    }
+  }, []);
+
+  // Load catalog count on startup & check server
   useEffect(() => {
-    getCatalogCount().then((count) => {
-      setCatalogCount(count);
-      if (count === 0) {
+    (async () => {
+      const localCount = await getCatalogCount();
+      setCatalogCount(localCount);
+
+      try {
+        const meta = await fetchCatalogMeta();
+        if (meta && meta.totalProducts > 0) {
+          if (localCount === 0 || localCount < meta.totalProducts) {
+            syncCatalogFromServer(meta.totalProducts);
+            return;
+          }
+        }
+      } catch (err) {
+        // Servidor no disponible o local offline
+      }
+
+      if (localCount === 0) {
         setIsUploaderOpen(true);
       }
-    });
-  }, []);
+    })();
+  }, [syncCatalogFromServer]);
+
 
   // Sync to LocalStorage
   useEffect(() => {
@@ -153,7 +202,7 @@ export default function App() {
       setIsOnline(false);
     };
 
-    const handleSyncInit = (data) => {
+    const handleSyncInit = async (data) => {
       setIsOnline(true);
       if (data.sessionName) setSessionName(data.sessionName);
       if (Array.isArray(data.countedItems)) {
@@ -164,6 +213,14 @@ export default function App() {
       }
       if (data.totalUsers) setOnlineUsers(data.totalUsers);
       if (data.auditors) setAuditorsList(data.auditors);
+
+      // Check if server catalog has items that we don't have locally
+      if (data.catalogCount && data.catalogCount > 0) {
+        const localCount = await getCatalogCount();
+        if (localCount === 0 || localCount < data.catalogCount) {
+          syncCatalogFromServer(data.catalogCount);
+        }
+      }
     };
 
     const handleUsersUpdate = (data) => {
@@ -236,6 +293,16 @@ export default function App() {
       }
     };
 
+    const handleCatalogUpdated = (data) => {
+      const timeStr = new Date().toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      setLastScannedMessage({
+        type: 'info',
+        text: `📦 Catálogo actualizado en el servidor (${data.totalProducts?.toLocaleString() || 0} productos). Sincronizando...`,
+        time: timeStr
+      });
+      syncCatalogFromServer(data.totalProducts || 0);
+    };
+
     socket.on('connect', handleConnect);
     socket.on('disconnect', handleDisconnect);
     socket.on('sync:init', handleSyncInit);
@@ -246,6 +313,7 @@ export default function App() {
     socket.on('session:renamed', handleSessionRenamed);
     socket.on('session:restored', handleSessionRestored);
     socket.on('catalog:syncedProduct', handleCatalogSyncedProduct);
+    socket.on('catalog:updated', handleCatalogUpdated);
 
     if (socket.connected) {
       handleConnect();
@@ -262,8 +330,9 @@ export default function App() {
       socket.off('session:renamed', handleSessionRenamed);
       socket.off('session:restored', handleSessionRestored);
       socket.off('catalog:syncedProduct', handleCatalogSyncedProduct);
+      socket.off('catalog:updated', handleCatalogUpdated);
     };
-  }, [currentUserName]);
+  }, [currentUserName, syncCatalogFromServer]);
 
   // Product Key helper (matches by barcode, SKU, or ID)
   const getItemKey = (p) => {
@@ -671,6 +740,23 @@ export default function App() {
         onConfirmClear={handleClearCount}
         totalItems={countedItems.length}
       />
+
+      {/* Catalog Syncing Toast Indicator */}
+      {isCatalogSyncing && (
+        <div className="fixed bottom-6 right-6 z-50 bg-slate-900/95 backdrop-blur-md text-white px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-3 border border-slate-700 animate-in fade-in slide-in-from-bottom-4">
+          <Loader2 className="w-5 h-5 text-indigo-400 animate-spin shrink-0" />
+          <div className="pr-2">
+            <p className="text-xs font-bold text-white flex items-center gap-1.5">
+              <span>Sincronizando catálogo con el servidor...</span>
+            </p>
+            <p className="text-[11px] text-slate-300">
+              {catalogSyncProgress.total > 0
+                ? `${catalogSyncProgress.current.toLocaleString()} de ${catalogSyncProgress.total.toLocaleString()} productos`
+                : 'Descargando base de datos compartida...'}
+            </p>
+          </div>
+        </div>
+      )}
 
     </div>
   );

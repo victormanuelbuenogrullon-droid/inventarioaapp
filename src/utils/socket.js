@@ -2,10 +2,52 @@ import { io } from 'socket.io-client';
 
 let socket = null;
 
+export function getServerBaseUrl() {
+  const url = import.meta.env.VITE_BACKEND_URL || localStorage.getItem('inventariosapp_server_url') || window.location.origin;
+  return url.replace(/\/$/, '');
+}
+
+export async function uploadCatalogToServer(products) {
+  const baseUrl = getServerBaseUrl();
+  const response = await fetch(`${baseUrl}/api/catalog/upload`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ products })
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || `Error del servidor: ${response.statusText}`);
+  }
+
+  return await response.json();
+}
+
+export async function fetchCatalogFromServer() {
+  const baseUrl = getServerBaseUrl();
+  const response = await fetch(`${baseUrl}/api/catalog`);
+  if (!response.ok) {
+    throw new Error(`Error al descargar catálogo: ${response.statusText}`);
+  }
+  return await response.json();
+}
+
+export async function fetchCatalogMeta() {
+  try {
+    const baseUrl = getServerBaseUrl();
+    const response = await fetch(`${baseUrl}/api/catalog/meta`);
+    if (!response.ok) return null;
+    return await response.json();
+  } catch (err) {
+    return null;
+  }
+}
+
 export function getSocket() {
   if (!socket) {
-    // In production or hosted on Netlify, connects to VITE_BACKEND_URL if specified, otherwise current origin
-    const serverUrl = import.meta.env.VITE_BACKEND_URL || localStorage.getItem('inventariosapp_server_url') || window.location.origin;
+    const serverUrl = getServerBaseUrl();
     
     socket = io(serverUrl, {
       transports: ['websocket', 'polling'],
@@ -31,6 +73,8 @@ export function getSocket() {
 
   return socket;
 }
+
+
 
 export function emitCountApply(product, qty, isSettingExact = false) {
   const s = getSocket();

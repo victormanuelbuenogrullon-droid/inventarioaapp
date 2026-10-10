@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import Papa from 'papaparse';
 import { UploadCloud, CheckCircle2, AlertTriangle, X, FileText, Loader2 } from 'lucide-react';
 import { saveProductsInBatches } from '../utils/db';
+import { uploadCatalogToServer } from '../utils/socket';
 
 export default function CsvUploaderModal({ isOpen, onClose, onImportSuccess, currentCount }) {
   const [isDragging, setIsDragging] = useState(false);
@@ -74,6 +75,14 @@ export default function CsvUploaderModal({ isOpen, onClose, onImportSuccess, cur
             });
           });
 
+          setProgress({ current: formattedProducts.length, total: formattedProducts.length, text: 'Sincronizando catálogo con el servidor para todos los usuarios...' });
+
+          try {
+            await uploadCatalogToServer(formattedProducts);
+          } catch (uploadErr) {
+            console.warn('Advertencia al sincronizar catálogo con servidor:', uploadErr);
+          }
+
           setSuccessInfo({
             total: formattedProducts.length,
             fileName: file.name
@@ -82,6 +91,7 @@ export default function CsvUploaderModal({ isOpen, onClose, onImportSuccess, cur
           if (onImportSuccess) {
             onImportSuccess(formattedProducts.length);
           }
+
         } catch (err) {
           console.error(err);
           setErrorMsg(err.message || 'Error al procesar el archivo CSV');
