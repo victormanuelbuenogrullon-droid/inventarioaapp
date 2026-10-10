@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Barcode, Search, Zap, ListPlus, CornerDownLeft, PlusCircle, Check, AlertCircle } from 'lucide-react';
+import { Barcode, Search, Zap, ListPlus, CornerDownLeft, PlusCircle, Check, AlertCircle, Camera } from 'lucide-react';
 import { findProduct } from '../utils/db';
 import { playSuccessBeep, playDoubleBeep, playErrorBeep } from '../utils/sound';
 
@@ -7,6 +7,7 @@ export default function ScannerBar({
   onProductFound,
   onOpenManualSearch,
   onOpenGenericModal,
+  onOpenCamScanner,
   scanMode, // 'auto1' | 'askQty'
   setScanMode,
   soundEnabled,
@@ -16,8 +17,11 @@ export default function ScannerBar({
   const [isSearching, setIsSearching] = useState(false);
   const inputRef = useRef(null);
 
-  // Auto focus input on mount and whenever user clicks outside
+  // Auto focus input on mount only on non-touch desktop devices
   useEffect(() => {
+    const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+    if (isTouchDevice) return; // Don't force focus on mobile to prevent unwanted virtual keyboard popup
+
     const keepFocus = () => {
       if (document.activeElement?.tagName === 'INPUT' && document.activeElement !== inputRef.current) {
         return;
@@ -29,6 +33,7 @@ export default function ScannerBar({
     window.addEventListener('focus', keepFocus);
     return () => window.removeEventListener('focus', keepFocus);
   }, []);
+
 
   const handleScanSubmit = async (e) => {
     e?.preventDefault();
@@ -104,6 +109,17 @@ export default function ScannerBar({
         {/* Scan Mode Toggle & Buttons */}
         <div className="flex flex-wrap items-center gap-2 justify-between lg:justify-end">
           
+          {/* Mobile Camera Barcode Scanner Button */}
+          <button
+            type="button"
+            onClick={onOpenCamScanner}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-sm shadow-indigo-200 transition-all active:scale-95"
+            title="Abrir cámara trasera del teléfono o tablet para escanear"
+          >
+            <Camera className="w-4 h-4 text-white animate-pulse" />
+            <span>📷 Cámara</span>
+          </button>
+
           {/* Mode Switcher */}
           <div className="bg-slate-100 p-1 rounded-xl border border-slate-200 flex items-center gap-1">
             <button
@@ -154,7 +170,8 @@ export default function ScannerBar({
             title="Registrar un producto genérico o nuevo al vuelo"
           >
             <PlusCircle className="w-3.5 h-3.5 text-slate-300" />
-            <span>+ Genérico / Nuevo</span>
+            <span className="hidden sm:inline">+ Genérico / Nuevo</span>
+            <span className="sm:hidden">+ Nuevo</span>
           </button>
 
         </div>

@@ -14,6 +14,7 @@ import AuditorsModal from './components/AuditorsModal';
 import CsvUploaderModal from './components/CsvUploaderModal';
 import PrintReportModal from './components/PrintReportModal';
 import ClearConfirmModal from './components/ClearConfirmModal';
+import CameraScannerModal from './components/CameraScannerModal';
 import { getCatalogCount, saveProductsInBatches, saveSingleProduct, updateProductInDB } from './utils/db';
 import { exportToExcel } from './utils/export';
 import { 
@@ -78,6 +79,7 @@ export default function App() {
 
   // Modals
   const [isUploaderOpen, setIsUploaderOpen] = useState(false);
+  const [isCamScannerOpen, setIsCamScannerOpen] = useState(false);
   const [isManualSearchOpen, setIsManualSearchOpen] = useState(false);
   const [isSessionManagerOpen, setIsSessionManagerOpen] = useState(false);
   const [isAuditorsModalOpen, setIsAuditorsModalOpen] = useState(false);
@@ -632,11 +634,13 @@ export default function App() {
               onProductFound={handleProductFound}
               onOpenManualSearch={() => setIsManualSearchOpen(true)}
               onOpenGenericModal={handleOpenGenericModal}
+              onOpenCamScanner={() => setIsCamScannerOpen(true)}
               scanMode={scanMode}
               setScanMode={setScanMode}
               soundEnabled={soundEnabled}
               lastScannedMessage={lastScannedMessage}
             />
+
 
             {/* General Totals Summary Dashboard */}
             <SummaryCards items={countedItems} />
@@ -680,6 +684,18 @@ export default function App() {
         }}
         currentCount={catalogCount}
       />
+
+      <CameraScannerModal
+        isOpen={isCamScannerOpen}
+        onClose={() => setIsCamScannerOpen(false)}
+        onProductFound={handleProductFound}
+        onOpenGenericModal={handleOpenGenericModal}
+        scanMode={scanMode}
+        setScanMode={setScanMode}
+        soundEnabled={soundEnabled}
+        setSoundEnabled={setSoundEnabled}
+      />
+
 
       <GenericProductModal
         isOpen={genericModalData.isOpen}

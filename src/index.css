@@ -39,6 +39,38 @@
   animation: subtle-pulse 2.5s infinite ease-in-out;
 }
 
+@keyframes scan {
+  0% {
+    top: 5%;
+    opacity: 0.8;
+  }
+  50% {
+    top: 90%;
+    opacity: 1;
+  }
+  100% {
+    top: 5%;
+    opacity: 0.8;
+  }
+}
+
+/* Ensure mobile camera preview is nicely cropped without black side bars */
+#camera-scanner-view {
+  border: none !important;
+}
+
+#camera-scanner-view video {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+  border-radius: 0.75rem;
+}
+
+#camera-scanner-view img,
+#camera-scanner-view canvas {
+  display: none !important;
+}
+
 /* Print styles */
 @media print {
   body {

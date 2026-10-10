@@ -140,8 +140,8 @@ export default function InventoryTable({
 
       </div>
 
-      {/* Table */}
-      <div className="overflow-x-auto">
+      {/* Desktop & Tablet Table View (hidden on small mobile screens) */}
+      <div className="hidden md:block overflow-x-auto">
         <table className="w-full text-left text-xs border-collapse">
           <thead>
             <tr className="bg-slate-50 text-slate-600 border-b border-slate-200 font-semibold tracking-wider uppercase text-[11px]">
@@ -319,6 +319,108 @@ export default function InventoryTable({
             })}
           </tbody>
         </table>
+      </div>
+
+      {/* Mobile Card View (Optimized for Smartphones & Tablets) */}
+      <div className="md:hidden divide-y divide-slate-100">
+        {filteredAndSortedItems.map((item, idx) => {
+          const qty = Number(item.cantidadContada) || 0;
+          const cost = Number(item.costo) || 0;
+          const price = Number(item.precio) || 0;
+          const lineTotalCost = qty * cost;
+          const lineTotalPrice = qty * price;
+
+          return (
+            <div key={item.id || item.codigo || idx} className="p-4 space-y-3 bg-white">
+              
+              {/* Product Header */}
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-semibold">
+                      #{idx + 1}
+                    </span>
+                    <span className="font-mono text-xs font-bold text-slate-700">
+                      {item.codigoInternacional || item.codigoInterno || item.codigo}
+                    </span>
+                  </div>
+                  <h4 className="text-sm font-bold text-slate-900 mt-0.5 leading-snug">
+                    {item.descripcion}
+                  </h4>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-[10px] px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 font-medium">
+                      {item.unidad || 'UNIDAD'}
+                    </span>
+                    {item.categoria && (
+                      <span className="text-[10px] text-slate-400">
+                        {item.categoria}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => onEditItem(item)}
+                    className="p-2 rounded-xl bg-slate-100 active:bg-slate-200 text-slate-700"
+                    title="Editar"
+                  >
+                    <Edit3 className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => onDeleteItem(item)}
+                    className="p-2 rounded-xl bg-rose-50 active:bg-rose-100 text-rose-600"
+                    title="Eliminar"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Quantity Controls & Values in Mobile Card */}
+              <div className="flex items-center justify-between gap-3 pt-2 border-t border-slate-100">
+                
+                {/* Touch-Friendly Quantity Stepper */}
+                <div className="inline-flex items-center gap-1.5 bg-slate-100 p-1 rounded-2xl border border-slate-200">
+                  <button
+                    onClick={() => onDecrementItem(item)}
+                    className="w-8 h-8 rounded-xl bg-white active:bg-slate-200 text-slate-800 flex items-center justify-center font-bold shadow-xs"
+                  >
+                    <Minus className="w-4 h-4" />
+                  </button>
+                  
+                  <button
+                    onClick={() => onEditItem(item)}
+                    className="px-3 py-1 text-base font-extrabold text-slate-900"
+                  >
+                    {formatNumber(qty)}
+                  </button>
+
+                  <button
+                    onClick={() => onIncrementItem(item)}
+                    className="w-8 h-8 rounded-xl bg-white active:bg-slate-200 text-slate-800 flex items-center justify-center font-bold shadow-xs"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Totals */}
+                <div className="text-right">
+                  <div className="text-[11px] text-slate-400">Inversión:</div>
+                  <div className="text-sm font-extrabold text-emerald-700">
+                    {formatCurrency(lineTotalCost)}
+                  </div>
+                  <div className="text-[10px] text-slate-500">
+                    Venta: <strong className="text-slate-800 font-semibold">{formatCurrency(lineTotalPrice)}</strong>
+                  </div>
+                </div>
+
+              </div>
+
+            </div>
+          );
+        })}
       </div>
 
     </div>
