@@ -4,6 +4,8 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
+import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -11,6 +13,86 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const httpServer = createServer(app);
+const PORT = process.env.PORT || 3000;
+
+function getLocalIpAddress() {
+  try {
+    const interfaces = os.networkInterfaces();
+    let fallbackIp = null;
+    for (const name of Object.keys(interfaces)) {
+      const isVirtual = /vmnet|virtual|hyper-v|vethernet|loopback/i.test(name);
+      for (const iface of interfaces[name]) {
+        if (iface.family === 'IPv4' && !iface.internal && !iface.address.startsWith('169.254')) {
+          if (!isVirtual) {
+            return iface.address;
+          } else if (!fallbackIp) {
+            fallbackIp = iface.address;
+          }
+        }
+      }
+    }
+    if (fallbackIp) return fallbackIp;
+  } catch (err) {
+    console.warn('[Network] Error al detectar IP local:', err);
+  }
+  return 'localhost';
+}
+
+let sharedTunnelUrl = null;
+let cloudflaredProcess = null;
+
+function startCloudflareTunnel(port) {
+  const binaryName = process.platform === 'win32' ? 'cloudflared.exe' : 'cloudflared';
+  const binaryPath = path.join(__dirname, binaryName);
+
+  if (!fs.existsSync(binaryPath)) {
+    console.log(`[Tunnel] ${binaryName} no encontrado en la carpeta raíz. Túnel desactivado.`);
+    return;
+  }
+
+  console.log(`[Tunnel] Iniciando túnel seguro Cloudflare en puerto ${port}...`);
+  try {
+    cloudflaredProcess = spawn(binaryPath, ['tunnel', '--url', `http://localhost:${port}`, '--no-autoupdate'], {
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+
+    const handleOutput = (data) => {
+      const text = data.toString();
+      const match = text.match(/https:\/\/[a-zA-Z0-9-]+\.trycloudflare\.com/);
+      if (match && (!sharedTunnelUrl || sharedTunnelUrl !== match[0])) {
+        sharedTunnelUrl = match[0];
+        console.log(`\n======================================================================`);
+        console.log(` 🌐 ENLACE WEB PÚBLICO (CLOUDFLARE TUNNEL - ACCESO EN CUALQUIER LUGAR):`);
+        console.log(`    👉 ${sharedTunnelUrl}`);
+        console.log(`======================================================================\n`);
+        
+        io.emit('tunnel:updated', { tunnelUrl: sharedTunnelUrl });
+      }
+    };
+
+    cloudflaredProcess.stdout?.on('data', handleOutput);
+    cloudflaredProcess.stderr?.on('data', handleOutput);
+
+    cloudflaredProcess.on('error', (err) => {
+      console.warn('[Tunnel] Error en proceso cloudflared:', err.message);
+    });
+
+    cloudflaredProcess.on('exit', (code) => {
+      console.log(`[Tunnel] Proceso cloudflared finalizado (código ${code}).`);
+      sharedTunnelUrl = null;
+    });
+
+    process.on('exit', () => {
+      if (cloudflaredProcess) cloudflaredProcess.kill();
+    });
+    process.on('SIGINT', () => {
+      if (cloudflaredProcess) cloudflaredProcess.kill();
+      process.exit(0);
+    });
+  } catch (err) {
+    console.error('[Tunnel] Error al arrancar túnel:', err);
+  }
+}
 
 const io = new Server(httpServer, {
   cors: {
@@ -165,6 +247,61 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// Network information for multi-device sharing
+app.get('/api/network-info', (req, res) => {
+  const localIp = getLocalIpAddress();
+  res.json({
+    port: PORT,
+    localIp,
+    localUrl: `http://localhost:${PORT}`,
+    wifiUrl: `http://${localIp}:${PORT}`,
+    tunnelUrl: sharedTunnelUrl,
+    hasTunnel: !!sharedTunnelUrl,
+    totalCounted: sharedState.countedItems.length,
+    catalogCount: sharedCatalog.length,
+    sessionName: sharedState.sessionName
+  });
+});
+
+// Migrate local browser state to server shared database
+app.post('/api/migrate-from-client', (req, res) => {
+  const { sessionName, countedItems, historyLogs, catalog } = req.body;
+  let updatedAny = false;
+
+  if (Array.isArray(catalog) && catalog.length > 0) {
+    sharedCatalog = catalog;
+    persistCatalogToDisk();
+    updatedAny = true;
+    io.emit('catalog:updated', {
+      totalProducts: sharedCatalog.length,
+      updatedAt: new Date().toISOString()
+    });
+    console.log(`[Migrate] Catálogo subido desde navegador local: ${catalog.length} productos.`);
+  }
+
+  if (Array.isArray(countedItems) && countedItems.length > 0) {
+    sharedState.countedItems = countedItems;
+    if (sessionName) sharedState.sessionName = sessionName;
+    if (Array.isArray(historyLogs) && historyLogs.length > 0) {
+      sharedState.historyLogs = historyLogs;
+    }
+    persistStateToDisk();
+    updatedAny = true;
+    io.emit('session:restored', {
+      sessionName: sharedState.sessionName,
+      countedItems: sharedState.countedItems,
+      by: 'Migración desde navegador local'
+    });
+    console.log(`[Migrate] Inventario subido desde navegador local: ${countedItems.length} productos contados.`);
+  }
+
+  res.json({
+    success: true,
+    totalCounted: sharedState.countedItems.length,
+    catalogCount: sharedCatalog.length
+  });
+});
+
 // ==========================================
 // REAL-TIME WEBSOCKETS LOGIC
 // ==========================================
@@ -179,6 +316,8 @@ io.on('connection', (socket) => {
 
   console.log(`[Socket] Conectado: ${socket.id} (${connectedAuditors.size} usuarios en línea)`);
 
+  const localIp = getLocalIpAddress();
+
   // 1. Send initial shared state AND history logs to the newly connected user
   socket.emit('sync:init', {
     sessionName: sharedState.sessionName,
@@ -186,7 +325,10 @@ io.on('connection', (socket) => {
     historyLogs: sharedState.historyLogs || [],
     catalogCount: sharedCatalog.length,
     auditors: getAuditorsList(),
-    totalUsers: connectedAuditors.size
+    totalUsers: connectedAuditors.size,
+    tunnelUrl: sharedTunnelUrl,
+    wifiUrl: `http://${localIp}:${PORT}`,
+    localUrl: `http://localhost:${PORT}`
   });
 
   // 2. Broadcast updated user count to all users
@@ -482,12 +624,17 @@ if (fs.existsSync(DIST_PATH)) {
   });
 }
 
-const PORT = process.env.PORT || 3000;
 httpServer.listen(PORT, '0.0.0.0', () => {
-  console.log(`=======================================================`);
+  const localIp = getLocalIpAddress();
+  console.log(`======================================================================`);
   console.log(` 🚀 Servidor de Inventario Colaborativo en Línea`);
-  console.log(` 🌐 URL Local: http://localhost:${PORT}`);
+  console.log(` 💻 Esta PC (Local):     http://localhost:${PORT}`);
+  console.log(` 📶 Red Local (Wi-Fi):   http://${localIp}:${PORT}`);
   console.log(` 👥 Sincronización multiusuario en tiempo real activa`);
   console.log(` 📦 Catálogo en servidor: ${sharedCatalog.length} productos`);
-  console.log(`=======================================================`);
+  console.log(` 📝 Productos contados:   ${sharedState.countedItems.length}`);
+  console.log(`======================================================================`);
+  
+  // Start Cloudflare Tunnel automatically
+  startCloudflareTunnel(PORT);
 });

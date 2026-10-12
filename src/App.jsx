@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, UploadCloud, QrCode } from 'lucide-react';
 import Navbar from './components/Navbar';
 import ScannerBar from './components/ScannerBar';
 import SummaryCards from './components/SummaryCards';
@@ -11,12 +11,13 @@ import SessionManagerModal from './components/SessionManagerModal';
 import EditProductModal from './components/EditProductModal';
 import CatalogManagerView from './components/CatalogManagerView';
 import AuditorsModal from './components/AuditorsModal';
+import ShareSessionModal from './components/ShareSessionModal';
 import CsvUploaderModal from './components/CsvUploaderModal';
 import PrintReportModal from './components/PrintReportModal';
 import ClearConfirmModal from './components/ClearConfirmModal';
 import CameraScannerModal from './components/CameraScannerModal';
 import HistoryLogView from './components/HistoryLogView';
-import { getCatalogCount, saveProductsInBatches, saveSingleProduct, updateProductInDB, initMemoryCache } from './utils/db';
+import { getCatalogCount, saveProductsInBatches, saveSingleProduct, updateProductInDB, initMemoryCache, getAllProductsFromDB } from './utils/db';
 import { exportToExcel } from './utils/export';
 import { 
   getSocket, 
@@ -29,7 +30,9 @@ import {
   emitSetAuditorName,
   emitHistoryClear,
   fetchCatalogFromServer,
-  fetchCatalogMeta
+  fetchCatalogMeta,
+  fetchNetworkInfo,
+  migrateLocalDataToServer
 } from './utils/socket';
 
 import { playSuccessBeep } from './utils/sound';
@@ -119,7 +122,9 @@ export default function App() {
   const [isAuditorsModalOpen, setIsAuditorsModalOpen] = useState(false);
   const [isPrintOpen, setIsPrintOpen] = useState(false);
   const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false);
-
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [networkUrls, setNetworkUrls] = useState({ tunnelUrl: '', wifiUrl: '', localUrl: '' });
+  const [localDataMigrationAvailable, setLocalDataMigrationAvailable] = useState(false);
   
   // Generic / On-the-fly Product Modal state
   const [genericModalData, setGenericModalData] = useState({
@@ -257,6 +262,27 @@ export default function App() {
       if (data.totalUsers) setOnlineUsers(data.totalUsers);
       if (data.auditors) setAuditorsList(data.auditors);
 
+      if (data.tunnelUrl || data.wifiUrl || data.localUrl) {
+        setNetworkUrls({
+          tunnelUrl: data.tunnelUrl || '',
+          wifiUrl: data.wifiUrl || '',
+          localUrl: data.localUrl || ''
+        });
+      }
+
+      // Check if server is empty, but this browser already has counted items or catalog
+      const serverCounted = (data.countedItems || []).length;
+      const serverCatalog = data.catalogCount || 0;
+      if (serverCounted === 0 && serverCatalog === 0) {
+        try {
+          const savedItems = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEY) || '[]');
+          const localCatCount = await getCatalogCount();
+          if (savedItems.length > 0 || localCatCount > 0) {
+            setLocalDataMigrationAvailable(true);
+          }
+        } catch {}
+      }
+
       // Check if server catalog has items that we don't have locally
       if (data.catalogCount && data.catalogCount > 0) {
         const localCount = await getCatalogCount();
@@ -366,6 +392,12 @@ export default function App() {
       syncCatalogFromServer(data.totalProducts || 0);
     };
 
+    const handleTunnelUpdated = (data) => {
+      if (data?.tunnelUrl) {
+        setNetworkUrls(prev => ({ ...prev, tunnelUrl: data.tunnelUrl }));
+      }
+    };
+
     socket.on('connect', handleConnect);
     socket.on('disconnect', handleDisconnect);
     socket.on('sync:init', handleSyncInit);
@@ -378,6 +410,7 @@ export default function App() {
     socket.on('session:restored', handleSessionRestored);
     socket.on('catalog:syncedProduct', handleCatalogSyncedProduct);
     socket.on('catalog:updated', handleCatalogUpdated);
+    socket.on('tunnel:updated', handleTunnelUpdated);
 
     if (socket.connected) {
       handleConnect();
@@ -396,6 +429,7 @@ export default function App() {
       socket.off('session:restored', handleSessionRestored);
       socket.off('catalog:syncedProduct', handleCatalogSyncedProduct);
       socket.off('catalog:updated', handleCatalogUpdated);
+      socket.off('tunnel:updated', handleTunnelUpdated);
     };
 
   }, [currentUserName, syncCatalogFromServer]);
@@ -674,6 +708,30 @@ export default function App() {
     });
   };
 
+  // Publish local data to server shared database
+  const handlePublishLocalData = async () => {
+    try {
+      setLastScannedMessage({
+        type: 'info',
+        text: '⏳ Sincronizando catálogo e inventario local con el servidor...'
+      });
+      const allLocalCatalog = await getAllProductsFromDB();
+      const res = await migrateLocalDataToServer({
+        sessionName,
+        countedItems,
+        historyLogs,
+        catalog: allLocalCatalog
+      });
+      setLocalDataMigrationAvailable(false);
+      setLastScannedMessage({
+        type: 'success',
+        text: `✅ ¡Datos sincronizados con éxito! ${res.totalCounted || countedItems.length} artículos contados y ${res.catalogCount || allLocalCatalog.length} productos en catálogo subidos al servidor central.`
+      });
+    } catch (err) {
+      alert(`Error al sincronizar: ${err.message || 'No se pudo conectar al servidor'}`);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col">
       
@@ -696,8 +754,39 @@ export default function App() {
         isOnline={isOnline}
         onlineUsers={onlineUsers}
         onOpenAuditorsModal={() => setIsAuditorsModalOpen(true)}
+        onOpenShareModal={() => setIsShareModalOpen(true)}
         currentUserName={currentUserName}
       />
+
+      {/* Local Data Migration Prompt Banner */}
+      {localDataMigrationAvailable && (
+        <div className="bg-amber-600 text-white px-4 py-2.5 shadow-md flex flex-wrap items-center justify-between gap-3 animate-in fade-in sticky top-14 z-30">
+          <div className="flex items-center gap-2 text-xs">
+            <UploadCloud className="w-5 h-5 shrink-0 animate-bounce text-amber-200" />
+            <span>
+              <strong>¡Se encontraron datos previos en este navegador!</strong> Tienes <strong>{countedItems.length}</strong> artículos contados y <strong>{catalogCount}</strong> en catálogo que aún no están en el servidor compartido.
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handlePublishLocalData}
+              className="px-3.5 py-1.5 bg-white text-amber-950 font-bold rounded-lg text-xs hover:bg-amber-50 shadow-sm transition-all flex items-center gap-1.5"
+            >
+              <UploadCloud className="w-3.5 h-3.5 text-amber-700" />
+              <span>Sincronizar al Servidor Compartido</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setLocalDataMigrationAvailable(false)}
+              className="text-white/80 hover:text-white text-xs px-2 py-1 font-bold"
+              title="Ignorar"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 space-y-4">
@@ -821,6 +910,25 @@ export default function App() {
         totalUsers={onlineUsers}
         currentUserName={currentUserName}
         setCurrentUserName={setCurrentUserName}
+      />
+
+      <ShareSessionModal
+        isOpen={isShareModalOpen}
+        onClose={() => setIsShareModalOpen(false)}
+        networkUrls={networkUrls}
+        totalUsers={onlineUsers}
+        auditors={auditorsList}
+        sessionName={sessionName}
+        countedItems={countedItems}
+        historyLogs={historyLogs}
+        catalogCount={catalogCount}
+        onSyncSuccess={() => {
+          setLocalDataMigrationAvailable(false);
+          setLastScannedMessage({
+            type: 'success',
+            text: '✅ Datos locales publicados exitosamente en el servidor compartido.'
+          });
+        }}
       />
 
       <QuantityModal

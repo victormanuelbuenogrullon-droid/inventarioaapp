@@ -295,6 +295,24 @@ export async function getCatalogCount() {
 }
 
 /**
+ * Get all catalog products from IndexedDB or RAM for cloud/server migration
+ */
+export async function getAllProductsFromDB() {
+  if (memoryCatalog && memoryCatalog.length > 0) {
+    return memoryCatalog.map(({ _sDesc, _sBar, _sSku, _sCode, _sCat, ...rest }) => rest);
+  }
+
+  const db = await openDB();
+  return new Promise((resolve) => {
+    const tx = db.transaction(['products'], 'readonly');
+    const store = tx.objectStore('products');
+    const req = store.getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => resolve([]);
+  });
+}
+
+/**
  * Meta store helpers
  */
 export async function setMeta(key, value) {

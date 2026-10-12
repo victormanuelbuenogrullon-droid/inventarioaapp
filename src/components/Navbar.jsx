@@ -13,7 +13,9 @@ import {
   Users,
   Wifi,
   WifiOff,
-  History
+  History,
+  QrCode,
+  Share2
 } from 'lucide-react';
 
 export default function Navbar({
@@ -34,6 +36,7 @@ export default function Navbar({
   isOnline = false,
   onlineUsers = 1,
   onOpenAuditorsModal,
+  onOpenShareModal,
   currentUserName
 }) {
   return (
@@ -67,6 +70,17 @@ export default function Navbar({
                   {isOnline ? `${onlineUsers} en línea` : 'Reconectando...'}
                 </span>
                 <Users className="w-3 h-3 ml-0.5 text-slate-500" />
+              </button>
+
+              {/* Connect other PCs / Mobile phones button */}
+              <button
+                type="button"
+                onClick={onOpenShareModal}
+                className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 transition-all shadow-2xs"
+                title="Compartir enlace o código QR para conectar otras PCs y celulares"
+              >
+                <QrCode className="w-3 h-3 text-indigo-600" />
+                <span>Conectar Dispositivos</span>
               </button>
             </div>
             <div className="flex items-center gap-2 text-xs text-slate-500">

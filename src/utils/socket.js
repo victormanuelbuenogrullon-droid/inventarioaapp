@@ -45,6 +45,35 @@ export async function fetchCatalogMeta() {
   }
 }
 
+export async function fetchNetworkInfo() {
+  try {
+    const baseUrl = getServerBaseUrl();
+    const response = await fetch(`${baseUrl}/api/network-info`);
+    if (!response.ok) return null;
+    return await response.json();
+  } catch (err) {
+    return null;
+  }
+}
+
+export async function migrateLocalDataToServer({ sessionName, countedItems, historyLogs, catalog }) {
+  const baseUrl = getServerBaseUrl();
+  const response = await fetch(`${baseUrl}/api/migrate-from-client`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ sessionName, countedItems, historyLogs, catalog })
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error || `Error migrando datos: ${response.statusText}`);
+  }
+
+  return await response.json();
+}
+
 export function getSocket() {
   if (!socket) {
     const serverUrl = getServerBaseUrl();
