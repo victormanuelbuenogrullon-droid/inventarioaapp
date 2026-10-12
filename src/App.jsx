@@ -605,13 +605,33 @@ export default function App() {
   };
 
   // Confirm quantity from modal
-  const handleQuantityConfirm = (product, enteredQty, isEditing) => {
+  const handleQuantityConfirm = async (product, enteredQty, isEditing, hasProductChanges = false) => {
+    // 1. If product details (descripcion, costo, precio) were updated, persist to DB & broadcast
+    if (hasProductChanges) {
+      try {
+        await updateProductInDB(product);
+        emitCatalogProductUpdated(product);
+      } catch (err) {
+        console.warn('Error al actualizar datos del producto:', err);
+      }
+    }
+
+    // 2. Apply count (passes updated product)
     if (isEditing) {
       applyCountToItem(product, enteredQty, true);
     } else {
       applyCountToItem(product, enteredQty, false);
     }
+
     setQuantityModalData({ isOpen: false, product: null, currentCount: 0, isEditing: false });
+
+    if (hasProductChanges) {
+      setLastScannedMessage({
+        type: 'success',
+        text: `✏️ Datos de "${product.descripcion}" actualizados en catálogo e inventario.`,
+        time: new Date().toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      });
+    }
 
     // If autoReopenCamera is active and scan came from camera, reopen camera immediately!
     if (autoReopenCamera && isCameraScanRef.current) {
