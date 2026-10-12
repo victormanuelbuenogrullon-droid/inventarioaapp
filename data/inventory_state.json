@@ -1,0 +1,37 @@
+{
+  "sessionName": "Pase de Inventario General",
+  "countedItems": [],
+  "historyLogs": [
+    {
+      "id": "log_1791809409354_nlji",
+      "stationName": "victor manuel bueno grullon",
+      "codigo": "7462656300256",
+      "codigoInterno": "000071",
+      "descripcion": "AVENA AMERICANA MOL.20/800 GR.",
+      "unidad": "FUNDA",
+      "categoria": "CEREAL",
+      "cantidad": 0,
+      "action": "delete",
+      "cantidadResultado": 0,
+      "costo": 43,
+      "precio": 52,
+      "timestamp": "2026-10-12T12:50:09.354Z"
+    },
+    {
+      "id": "log_1791809392790_rt4n",
+      "stationName": "Auditor #AAAB",
+      "codigo": "7462656300256",
+      "codigoInterno": "000071",
+      "descripcion": "AVENA AMERICANA MOL.20/800 GR.",
+      "unidad": "FUNDA",
+      "categoria": "CEREAL",
+      "cantidad": 1,
+      "action": "new",
+      "cantidadResultado": 1,
+      "costo": 43,
+      "precio": 52,
+      "timestamp": "2026-10-12T12:49:52.790Z"
+    }
+  ],
+  "lastUpdated": "2026-10-12T12:50:09.668Z"
+}

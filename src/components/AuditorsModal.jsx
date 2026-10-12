@@ -78,17 +78,17 @@ export default function AuditorsModal({
             </p>
           </form>
 
-          {/* Cloud Server URL (Optional for Netlify) */}
+          {/* Cloud Server URL */}
           <div className="pt-2 border-t border-slate-100 space-y-1.5 text-xs">
             <label className="block text-slate-700 font-semibold uppercase text-[11px]">
-              URL del Servidor en Tiempo Real (Opcional):
+              URL del Servidor en Render (Opcional):
             </label>
             <div className="flex gap-2">
               <input
                 type="text"
                 value={serverUrlInput}
                 onChange={(e) => setServerUrlInput(e.target.value)}
-                placeholder="https://tu-servidor.onrender.com"
+                placeholder="https://inventarioaapp.onrender.com"
                 className="flex-1 px-3 py-1.5 bg-slate-50 text-slate-800 placeholder-slate-400 rounded-lg border border-slate-300 text-xs font-mono"
               />
               <button
@@ -108,7 +108,7 @@ export default function AuditorsModal({
               </button>
             </div>
             <p className="text-[10px] text-slate-400">
-              Si subes la web a Netlify, puedes colocar aquí la URL de tu servidor en Render/Railway para sincronizar en tiempo real.
+              Conexión directa a tu servidor en la nube en Render.
             </p>
           </div>
 

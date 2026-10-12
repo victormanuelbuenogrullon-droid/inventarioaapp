@@ -49,13 +49,17 @@ export default function ShareSessionModal({
     }
   }, [isOpen]);
 
-  const tunnelUrl = info?.tunnelUrl || networkUrls?.tunnelUrl || '';
+  const currentOrigin = typeof window !== 'undefined' ? window.location.origin : '';
+  const isHostedOnRender = currentOrigin.includes('onrender.com');
+  const isHostedOnCloud = isHostedOnRender || (!currentOrigin.includes('localhost') && !currentOrigin.includes('127.0.0.1') && !currentOrigin.startsWith('http://192.168'));
+  
+  const publicWebUrl = isHostedOnCloud ? currentOrigin : (info?.tunnelUrl || networkUrls?.tunnelUrl || '');
   const wifiUrl = info?.wifiUrl || networkUrls?.wifiUrl || '';
 
   // Generate QR codes
   useEffect(() => {
-    if (tunnelUrl) {
-      QRCode.toDataURL(tunnelUrl, { width: 200, margin: 2, color: { dark: '#0f172a', light: '#ffffff' } })
+    if (publicWebUrl) {
+      QRCode.toDataURL(publicWebUrl, { width: 200, margin: 2, color: { dark: '#0f172a', light: '#ffffff' } })
         .then(setTunnelQr)
         .catch(console.warn);
     }
@@ -64,7 +68,7 @@ export default function ShareSessionModal({
         .then(setWifiQr)
         .catch(console.warn);
     }
-  }, [tunnelUrl, wifiUrl]);
+  }, [publicWebUrl, wifiUrl]);
 
   if (!isOpen) return null;
 
@@ -141,7 +145,7 @@ export default function ShareSessionModal({
             }`}
           >
             <Globe className="w-4 h-4 text-indigo-500" />
-            <span>Enlace Web (Cloudflare)</span>
+            <span>{isHostedOnRender ? 'Enlace Web en Render' : 'Enlace Web en la Nube'}</span>
           </button>
 
           <button
@@ -174,45 +178,45 @@ export default function ShareSessionModal({
         {/* Modal Body */}
         <div className="p-6">
 
-          {/* TAB 1: CLOUDFLARE PUBLIC TUNNEL */}
+          {/* TAB 1: CLOUDFLARE PUBLIC TUNNEL OR RENDER HOSTED URL */}
           {activeTab === 'cloud' && (
             <div className="space-y-4">
               <div className="bg-indigo-50/60 border border-indigo-100 rounded-xl p-3.5 text-xs text-indigo-900">
                 <p className="font-semibold flex items-center gap-1.5">
                   <Globe className="w-4 h-4 text-indigo-600 shrink-0" />
-                  Acceso desde cualquier computadora o celular en el mundo
+                  {isHostedOnRender ? 'Servidor activo en Render con sincronización en vivo' : 'Acceso desde cualquier computadora o celular en el mundo'}
                 </p>
                 <p className="text-indigo-700 text-[11px] mt-1">
-                  Abre este enlace seguro en la otra PC o escanea el QR con la cámara de tu teléfono móvil. Toda acción se sincroniza al instante.
+                  Abre este enlace en la otra PC o escanea el QR con tu teléfono móvil. Toda persona conectada verá los mismos productos e inventario en tiempo real.
                 </p>
               </div>
 
-              {tunnelUrl ? (
+              {publicWebUrl ? (
                 <div className="space-y-4">
                   <div className="flex flex-col sm:flex-row items-center gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200">
                     {tunnelQr && (
                       <div className="bg-white p-2 rounded-lg border border-slate-200 shadow-xs shrink-0">
-                        <img src={tunnelQr} alt="Código QR Cloudflare" className="w-32 h-32" />
+                        <img src={tunnelQr} alt="Código QR Enlace Web" className="w-32 h-32" />
                       </div>
                     )}
                     <div className="space-y-2 flex-1 w-full">
                       <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider">
                         Enlace HTTPS Compartido:
                       </label>
-                      <div className="p-2.5 bg-white border border-slate-200 rounded-lg text-xs font-mono break-all text-indigo-700 select-all">
-                        {tunnelUrl}
+                      <div className="p-2.5 bg-white border border-slate-200 rounded-lg text-xs font-mono break-all text-indigo-700 select-all font-semibold">
+                        {publicWebUrl}
                       </div>
                       <div className="flex gap-2 pt-1">
                         <button
                           type="button"
-                          onClick={() => handleCopy(tunnelUrl, 'tunnel')}
+                          onClick={() => handleCopy(publicWebUrl, 'publicWeb')}
                           className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors"
                         >
-                          {copiedType === 'tunnel' ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                          <span>{copiedType === 'tunnel' ? '¡Enlace Copiado!' : 'Copiar Enlace'}</span>
+                          {copiedType === 'publicWeb' ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                          <span>{copiedType === 'publicWeb' ? '¡Enlace Copiado!' : 'Copiar Enlace'}</span>
                         </button>
                         <a
-                          href={tunnelUrl}
+                          href={publicWebUrl}
                           target="_blank"
                           rel="noreferrer"
                           className="px-3 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors"
@@ -227,9 +231,9 @@ export default function ShareSessionModal({
               ) : (
                 <div className="p-6 text-center space-y-3 bg-slate-50 rounded-xl border border-dashed border-slate-300">
                   <Loader2 className="w-6 h-6 animate-spin text-indigo-600 mx-auto" />
-                  <p className="text-xs font-semibold text-slate-700">Generando enlace seguro con Cloudflare...</p>
+                  <p className="text-xs font-semibold text-slate-700">Detectando enlace del servidor...</p>
                   <p className="text-[11px] text-slate-500">
-                    Si acabas de iniciar el servidor, el enlace estará listo en unos segundos. También puedes usar la pestaña <strong>Red Local Wi-Fi</strong>.
+                    Si estás ejecutando el servidor localmente, el túnel estará listo en unos segundos. También puedes usar la pestaña <strong>Red Local Wi-Fi</strong>.
                   </p>
                 </div>
               )}
