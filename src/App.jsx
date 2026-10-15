@@ -17,6 +17,9 @@ import PrintReportModal from './components/PrintReportModal';
 import ClearConfirmModal from './components/ClearConfirmModal';
 import CameraScannerModal from './components/CameraScannerModal';
 import HistoryLogView from './components/HistoryLogView';
+import LoginView from './components/LoginView';
+import UserManagementModal from './components/UserManagementModal';
+import { getStoredToken, getStoredUser, fetchCurrentUser, clearAuthSession } from './utils/auth';
 import { getCatalogCount, saveProductsInBatches, saveSingleProduct, updateProductInDB, initMemoryCache, getAllProductsFromDB } from './utils/db';
 import { exportToExcel } from './utils/export';
 import { 
@@ -32,7 +35,8 @@ import {
   fetchCatalogFromServer,
   fetchCatalogMeta,
   fetchNetworkInfo,
-  migrateLocalDataToServer
+  migrateLocalDataToServer,
+  resetSocket
 } from './utils/socket';
 
 import { playSuccessBeep } from './utils/sound';
@@ -47,6 +51,11 @@ export default function App() {
   // Main Navigation View
   const [activeView, setActiveView] = useState('inventory'); // 'inventory' | 'catalog'
 
+  // Authentication State
+  const [currentUser, setCurrentUser] = useState(() => getStoredUser());
+  const [isAuthChecking, setIsAuthChecking] = useState(true);
+  const [isUserManagementOpen, setIsUserManagementOpen] = useState(false);
+
   // Multi-user Real-time Collaboration State
   const [isOnline, setIsOnline] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState(1);
@@ -54,6 +63,31 @@ export default function App() {
   const [currentUserName, setCurrentUserName] = useState(() => {
     return localStorage.getItem(LOCAL_STORAGE_USER_NAME) || '';
   });
+
+  // Verify session on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const token = getStoredToken();
+        if (token) {
+          const user = await fetchCurrentUser();
+          if (user) {
+            setCurrentUser(user);
+            setCurrentUserName(user.name);
+            localStorage.setItem(LOCAL_STORAGE_USER_NAME, user.name);
+          } else {
+            setCurrentUser(null);
+          }
+        } else {
+          setCurrentUser(null);
+        }
+      } catch (err) {
+        console.warn('Error verificando sesión inicial:', err);
+      } finally {
+        setIsAuthChecking(false);
+      }
+    })();
+  }, []);
 
   // Main State
   const [catalogCount, setCatalogCount] = useState(0);
@@ -752,6 +786,39 @@ export default function App() {
     }
   };
 
+  const handleLoginSuccess = (user, token) => {
+    setCurrentUser(user);
+    if (user.name) {
+      setCurrentUserName(user.name);
+      localStorage.setItem(LOCAL_STORAGE_USER_NAME, user.name);
+      emitSetAuditorName(user.name);
+    }
+    resetSocket();
+    getSocket();
+  };
+
+  const handleLogout = () => {
+    const confirmLogout = window.confirm('¿Deseas cerrar tu sesión actual?');
+    if (!confirmLogout) return;
+
+    clearAuthSession();
+    setCurrentUser(null);
+    resetSocket();
+  };
+
+  if (isAuthChecking) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4 text-white">
+        <Loader2 className="w-8 h-8 animate-spin text-indigo-400 mb-3" />
+        <p className="text-sm font-semibold text-slate-300">Verificando sesión segura...</p>
+      </div>
+    );
+  }
+
+  if (!currentUser) {
+    return <LoginView onLoginSuccess={handleLoginSuccess} />;
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col">
       
@@ -776,6 +843,9 @@ export default function App() {
         onOpenAuditorsModal={() => setIsAuditorsModalOpen(true)}
         onOpenShareModal={() => setIsShareModalOpen(true)}
         currentUserName={currentUserName}
+        currentUser={currentUser}
+        onOpenUserManagement={() => setIsUserManagementOpen(true)}
+        onLogout={handleLogout}
       />
 
       {/* Local Data Migration Prompt Banner */}
@@ -984,6 +1054,13 @@ export default function App() {
         onClose={() => setIsClearConfirmOpen(false)}
         onConfirmClear={handleClearCount}
         totalItems={countedItems.length}
+      />
+
+      {/* Admin User Management Modal */}
+      <UserManagementModal
+        isOpen={isUserManagementOpen}
+        onClose={() => setIsUserManagementOpen(false)}
+        currentUserId={currentUser?.id}
       />
 
       {/* Catalog Syncing Toast Indicator */}

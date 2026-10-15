@@ -7,6 +7,7 @@ import path from 'path';
 import os from 'os';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
+import crypto from 'crypto';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -113,6 +114,7 @@ if (!fs.existsSync(DATA_DIR)) {
 
 const STATE_FILE = path.join(DATA_DIR, 'inventory_state.json');
 const CATALOG_FILE = path.join(DATA_DIR, 'catalog.json');
+const USERS_FILE = path.join(DATA_DIR, 'users.json');
 
 // Default initial state
 let sharedState = {
@@ -183,6 +185,121 @@ function persistCatalogToDisk() {
   }, 500);
 }
 
+// ==========================================
+// USER AUTHENTICATION & SECURITY HELPERS
+// ==========================================
+const AUTH_SECRET = process.env.AUTH_SECRET || 'inventariosapp_secret_key_prod_2026';
+
+function hashPassword(password, salt = crypto.randomBytes(16).toString('hex')) {
+  const hash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
+  return { hash, salt };
+}
+
+function verifyPassword(password, hash, salt) {
+  if (!password || !hash || !salt) return false;
+  const verifyHash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
+  return verifyHash === hash;
+}
+
+function generateToken(user) {
+  const payload = Buffer.from(JSON.stringify({
+    userId: user.id,
+    username: user.username,
+    name: user.name,
+    role: user.role,
+    exp: Date.now() + 1000 * 60 * 60 * 24 * 30 // 30 days
+  })).toString('base64');
+  const sig = crypto.createHmac('sha256', AUTH_SECRET).update(payload).digest('hex');
+  return `${payload}.${sig}`;
+}
+
+function verifyToken(token) {
+  if (!token || typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length !== 2) return null;
+  const [payloadBase64, sig] = parts;
+  const expectedSig = crypto.createHmac('sha256', AUTH_SECRET).update(payloadBase64).digest('hex');
+  if (sig !== expectedSig) return null;
+  try {
+    const data = JSON.parse(Buffer.from(payloadBase64, 'base64').toString('utf-8'));
+    if (data.exp && data.exp < Date.now()) return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+let sharedUsers = [];
+
+function persistUsersToDisk() {
+  try {
+    fs.writeFileSync(USERS_FILE, JSON.stringify(sharedUsers, null, 2), 'utf-8');
+    console.log(`[Auth] ${sharedUsers.length} usuarios guardados en disco.`);
+  } catch (err) {
+    console.error('[Auth] Error guardando usuarios en disco:', err);
+  }
+}
+
+// Load saved users from disk or create default admin
+try {
+  if (fs.existsSync(USERS_FILE)) {
+    const rawUsers = fs.readFileSync(USERS_FILE, 'utf-8');
+    const parsedUsers = JSON.parse(rawUsers);
+    if (Array.isArray(parsedUsers) && parsedUsers.length > 0) {
+      sharedUsers = parsedUsers;
+      console.log(`[Auth] Cargados ${sharedUsers.length} usuarios registrados desde disco.`);
+    }
+  }
+
+  // If no users exist, initialize default admin
+  if (sharedUsers.length === 0) {
+    const { hash, salt } = hashPassword('admin');
+    sharedUsers = [
+      {
+        id: 'u_admin',
+        username: 'admin',
+        name: 'Administrador',
+        role: 'admin',
+        passwordHash: hash,
+        salt,
+        createdAt: new Date().toISOString()
+      }
+    ];
+    persistUsersToDisk();
+    console.log('[Auth] Administrador por defecto inicializado: (usuario: admin / contraseña: admin)');
+  }
+} catch (err) {
+  console.error('[Auth] Error al inicializar usuarios:', err);
+}
+
+// Authentication Middlewares
+function requireAuth(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Acceso no autorizado. Inicia sesión.' });
+  }
+  const token = authHeader.slice(7).trim();
+  const tokenData = verifyToken(token);
+  if (!tokenData) {
+    return res.status(401).json({ error: 'Sesión expirada o inválida. Inicia sesión de nuevo.' });
+  }
+  const user = sharedUsers.find((u) => u.id === tokenData.userId);
+  if (!user) {
+    return res.status(401).json({ error: 'El usuario ya no existe o fue eliminado.' });
+  }
+  req.user = user;
+  next();
+}
+
+function requireAdmin(req, res, next) {
+  requireAuth(req, res, () => {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Permiso denegado. Se requieren privilegios de Administrador.' });
+    }
+    next();
+  });
+}
+
 // Connected clients tracking
 const connectedAuditors = new Map();
 
@@ -193,6 +310,168 @@ function getAuditorsList() {
 function getItemKey(p) {
   return p.codigoInternacional || p.codigoInterno || p.codigo || p.id;
 }
+
+// ==========================================
+// REST API ENDPOINTS FOR AUTH & USERS
+// ==========================================
+
+// Login
+app.post('/api/auth/login', (req, res) => {
+  const { username, password } = req.body || {};
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Ingresa tu usuario y contraseña' });
+  }
+
+  const cleanUser = String(username).trim().toLowerCase();
+  const user = sharedUsers.find((u) => u.username.toLowerCase() === cleanUser);
+
+  if (!user || !verifyPassword(String(password), user.passwordHash, user.salt)) {
+    return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
+  }
+
+  const token = generateToken(user);
+  res.json({
+    success: true,
+    token,
+    user: {
+      id: user.id,
+      username: user.username,
+      name: user.name,
+      role: user.role
+    }
+  });
+});
+
+// Check current user profile / session
+app.get('/api/auth/me', requireAuth, (req, res) => {
+  res.json({
+    success: true,
+    user: {
+      id: req.user.id,
+      username: req.user.username,
+      name: req.user.name,
+      role: req.user.role
+    }
+  });
+});
+
+// List users (Admin only)
+app.get('/api/users', requireAdmin, (req, res) => {
+  const safeUsers = sharedUsers.map((u) => ({
+    id: u.id,
+    username: u.username,
+    name: u.name,
+    role: u.role,
+    createdAt: u.createdAt
+  }));
+  res.json(safeUsers);
+});
+
+// Create new user (Admin only)
+app.post('/api/users', requireAdmin, (req, res) => {
+  const { username, password, name, role } = req.body || {};
+
+  if (!username || !password || !name) {
+    return res.status(400).json({ error: 'Todos los campos son obligatorios' });
+  }
+
+  const cleanUsername = String(username).trim().toLowerCase();
+  const cleanName = String(name).trim();
+
+  if (cleanUsername.length < 3) {
+    return res.status(400).json({ error: 'El usuario debe tener al menos 3 caracteres' });
+  }
+
+  if (String(password).length < 4) {
+    return res.status(400).json({ error: 'La contraseña debe tener al menos 4 caracteres' });
+  }
+
+  if (sharedUsers.some((u) => u.username.toLowerCase() === cleanUsername)) {
+    return res.status(400).json({ error: 'Ese nombre de usuario ya está registrado' });
+  }
+
+  const assignedRole = role === 'admin' ? 'admin' : 'auditor';
+  const { hash, salt } = hashPassword(String(password));
+
+  const newUser = {
+    id: `u_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    username: cleanUsername,
+    name: cleanName,
+    role: assignedRole,
+    passwordHash: hash,
+    salt,
+    createdAt: new Date().toISOString()
+  };
+
+  sharedUsers.push(newUser);
+  persistUsersToDisk();
+
+  console.log(`[Auth] Nuevo usuario creado por ${req.user.username}: ${newUser.username} (${newUser.role})`);
+
+  res.json({
+    success: true,
+    user: {
+      id: newUser.id,
+      username: newUser.username,
+      name: newUser.name,
+      role: newUser.role,
+      createdAt: newUser.createdAt
+    }
+  });
+});
+
+// Delete user (Admin only)
+app.delete('/api/users/:id', requireAdmin, (req, res) => {
+  const { id } = req.params;
+
+  if (req.user.id === id) {
+    return res.status(400).json({ error: 'No puedes eliminar tu propio usuario en uso.' });
+  }
+
+  const target = sharedUsers.find((u) => u.id === id);
+  if (!target) {
+    return res.status(404).json({ error: 'Usuario no encontrado' });
+  }
+
+  // Prevent deleting the last admin
+  const adminCount = sharedUsers.filter((u) => u.role === 'admin').length;
+  if (target.role === 'admin' && adminCount <= 1) {
+    return res.status(400).json({ error: 'No puedes eliminar el único administrador del sistema.' });
+  }
+
+  sharedUsers = sharedUsers.filter((u) => u.id !== id);
+  persistUsersToDisk();
+
+  console.log(`[Auth] Usuario ${target.username} eliminado por ${req.user.username}`);
+  res.json({ success: true, message: 'Usuario eliminado correctamente' });
+});
+
+// Change user password (Admin can change any, user can change own)
+app.put('/api/users/:id/password', requireAuth, (req, res) => {
+  const { id } = req.params;
+  const { newPassword } = req.body || {};
+
+  if (req.user.role !== 'admin' && req.user.id !== id) {
+    return res.status(403).json({ error: 'No tienes permisos para modificar esta contraseña.' });
+  }
+
+  if (!newPassword || String(newPassword).length < 4) {
+    return res.status(400).json({ error: 'La nueva contraseña debe tener al menos 4 caracteres.' });
+  }
+
+  const target = sharedUsers.find((u) => u.id === id);
+  if (!target) {
+    return res.status(404).json({ error: 'Usuario no encontrado.' });
+  }
+
+  const { hash, salt } = hashPassword(String(newPassword));
+  target.passwordHash = hash;
+  target.salt = salt;
+  persistUsersToDisk();
+
+  console.log(`[Auth] Contraseña de ${target.username} actualizada.`);
+  res.json({ success: true, message: 'Contraseña actualizada con éxito.' });
+});
 
 // ==========================================
 // REST API ENDPOINTS FOR CATALOG & HEALTH
@@ -307,7 +586,17 @@ app.post('/api/migrate-from-client', (req, res) => {
 // ==========================================
 
 io.on('connection', (socket) => {
-  const defaultName = `Auditor #${socket.id.slice(-4)}`;
+  let defaultName = `Auditor #${socket.id.slice(-4)}`;
+
+  // Extract user identity from handshake auth token if available
+  const clientToken = socket.handshake.auth?.token || socket.handshake.query?.token;
+  if (clientToken) {
+    const verified = verifyToken(clientToken);
+    if (verified && verified.name) {
+      defaultName = verified.name;
+    }
+  }
+
   connectedAuditors.set(socket.id, {
     id: socket.id,
     name: defaultName,

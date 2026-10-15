@@ -77,8 +77,10 @@ export async function migrateLocalDataToServer({ sessionName, countedItems, hist
 export function getSocket() {
   if (!socket) {
     const serverUrl = getServerBaseUrl();
+    const token = localStorage.getItem('inventariosapp_token_v1');
     
     socket = io(serverUrl, {
+      auth: { token },
       transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionAttempts: Infinity,
@@ -101,6 +103,13 @@ export function getSocket() {
   }
 
   return socket;
+}
+
+export function resetSocket() {
+  if (socket) {
+    socket.disconnect();
+    socket = null;
+  }
 }
 
 

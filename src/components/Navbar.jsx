@@ -15,7 +15,10 @@ import {
   WifiOff,
   History,
   QrCode,
-  Share2
+  Share2,
+  ShieldCheck,
+  LogOut,
+  User
 } from 'lucide-react';
 
 export default function Navbar({
@@ -37,7 +40,10 @@ export default function Navbar({
   onlineUsers = 1,
   onOpenAuditorsModal,
   onOpenShareModal,
-  currentUserName
+  currentUserName,
+  currentUser,
+  onOpenUserManagement,
+  onLogout
 }) {
   return (
     <header className="bg-white/95 backdrop-blur border-b border-slate-200 sticky top-0 z-40 px-4 py-2.5 shadow-sm">
@@ -231,6 +237,56 @@ export default function Navbar({
             >
               <Trash2 className="w-4 h-4" />
             </button>
+          )}
+
+          {/* User Profile, Admin User Management & Logout */}
+          {currentUser && (
+            <div className="flex items-center gap-1.5 pl-2 sm:pl-3 border-l border-slate-200">
+              
+              {/* Admin-only User Management Button */}
+              {currentUser.role === 'admin' && (
+                <button
+                  type="button"
+                  onClick={onOpenUserManagement}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 transition-all shadow-2xs"
+                  title="Gestionar Usuarios (Crear o Eliminar Cuentas)"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5 text-indigo-600" />
+                  <span className="hidden sm:inline">Usuarios</span>
+                </button>
+              )}
+
+              {/* User Identity Pill */}
+              <div 
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-50 border border-slate-200"
+                title={`Sesión iniciada como @${currentUser.username} (${currentUser.role === 'admin' ? 'Administrador' : 'Auditor'})`}
+              >
+                <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white ${
+                  currentUser.role === 'admin' ? 'bg-indigo-600' : 'bg-slate-700'
+                }`}>
+                  {currentUser.name ? currentUser.name.slice(0, 1).toUpperCase() : 'U'}
+                </div>
+                <div className="hidden md:flex flex-col text-left">
+                  <span className="text-[11px] font-bold text-slate-800 leading-none">
+                    {currentUser.name}
+                  </span>
+                  <span className="text-[9px] text-slate-400 capitalize leading-none mt-0.5">
+                    {currentUser.role === 'admin' ? 'Administrador' : 'Auditor'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Logout Button */}
+              <button
+                type="button"
+                onClick={onLogout}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-100 transition-all"
+                title="Cerrar sesión"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+
+            </div>
           )}
         </div>
 
