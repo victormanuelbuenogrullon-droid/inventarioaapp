@@ -380,7 +380,8 @@ function requireAuth(req, res, next) {
         id: tokenData.userId,
         username: tokenData.username,
         name: tokenData.name,
-        role: 'auditor',
+        role: 'collaborator',
+        isCollaborator: true,
         sessionCode: tokenData.sessionCode,
         expiresAt: targetSession.expiresAt
       };
@@ -517,6 +518,8 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
       username: req.user.username,
       name: req.user.name,
       role: req.user.role,
+      isCollaborator: Boolean(req.user.isCollaborator || req.user.role === 'collaborator' || String(req.user.id).startsWith('collab_')),
+      sessionCode: req.user.sessionCode || null,
       accessDays: req.user.accessDays || null,
       expiresAt: req.user.expiresAt || null
     }
@@ -732,6 +735,10 @@ app.post('/api/users/restore', requireAdmin, (req, res) => {
 
 // Create new counting session
 app.post('/api/sessions/create', requireAuth, (req, res) => {
+  if (req.user.isCollaborator || req.user.role === 'collaborator' || String(req.user.id).startsWith('collab_')) {
+    return res.status(403).json({ error: 'Los auxiliares no tienen permiso para crear sesiones de conteo.' });
+  }
+
   const { name } = req.body || {};
   const cleanName = (name && String(name).trim()) || `Inventario de ${req.user.name}`;
   const code = generateSessionCode();
@@ -788,6 +795,10 @@ app.get('/api/sessions/validate/:code', (req, res) => {
 
 // Get all sessions created by current user (or all if admin)
 app.get('/api/sessions/my', requireAuth, (req, res) => {
+  if (req.user.isCollaborator || req.user.role === 'collaborator' || String(req.user.id).startsWith('collab_')) {
+    return res.json([]);
+  }
+
   let list = Object.values(sharedSessions);
   if (req.user.role !== 'admin') {
     list = list.filter((s) => s.createdBy === req.user.id);
@@ -812,6 +823,11 @@ app.get('/api/sessions/my', requireAuth, (req, res) => {
 app.get('/api/sessions/:code', requireAuth, (req, res) => {
   const { code } = req.params;
   const cleanCode = String(code).trim().toUpperCase();
+  const isCollab = req.user.isCollaborator || req.user.role === 'collaborator' || String(req.user.id).startsWith('collab_');
+  if (isCollab && req.user.sessionCode && req.user.sessionCode !== cleanCode) {
+    return res.status(403).json({ error: 'Los auxiliares solo tienen acceso a la sesión asignada.' });
+  }
+
   const session = sharedSessions[cleanCode];
   if (!session) {
     return res.status(404).json({ error: `La sesión "${cleanCode}" no fue encontrada.` });
@@ -866,7 +882,8 @@ app.post('/api/auth/collaborator-login', (req, res) => {
     id: `collab_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
     username: cleanName.toLowerCase().replace(/\s+/g, '_'),
     name: `${cleanName} (Auxiliar)`,
-    role: 'auditor',
+    role: 'collaborator',
+    isCollaborator: true,
     sessionCode: cleanCode,
     expiresAt: session.expiresAt
   };
@@ -1036,29 +1053,19 @@ app.get('/api/network-info', (req, res) => {
   });
 });
 
-// Migrate local browser state to server shared database
-app.post('/api/migrate-from-client', (req, res) => {
+// Migrate local browser state to server shared database (Admin Only)
+app.post('/api/migrate-from-client', requireAdmin, (req, res) => {
   const { sessionCode, sessionName, countedItems, historyLogs, catalog } = req.body;
-
-  // Authenticate user token if provided
-  const authHeader = req.headers.authorization;
-  const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
-  const tokenData = token ? verifyToken(token) : null;
-  const isAdmin = tokenData && tokenData.role === 'admin';
 
   // Only Administrator can replace or modify the shared master catalog!
   if (Array.isArray(catalog) && catalog.length > 0) {
-    if (isAdmin) {
-      sharedCatalog = catalog;
-      persistCatalogToDisk();
-      io.emit('catalog:updated', {
-        totalProducts: sharedCatalog.length,
-        updatedAt: new Date().toISOString()
-      });
-      console.log(`[Migrate] Catálogo maestro subido por administrador (${tokenData.username}): ${catalog.length} productos.`);
-    } else {
-      console.warn(`[Migrate] Ignorando subida de catálogo maestro de usuario no administrador (${tokenData?.username || 'anónimo'}).`);
-    }
+    sharedCatalog = catalog;
+    persistCatalogToDisk();
+    io.emit('catalog:updated', {
+      totalProducts: sharedCatalog.length,
+      updatedAt: new Date().toISOString()
+    });
+    console.log(`[Migrate] Catálogo maestro subido por administrador (${req.user.username}): ${catalog.length} productos.`);
   }
 
   const targetCode = sessionCode ? String(sessionCode).trim().toUpperCase() : Object.keys(sharedSessions)[0] || 'INV-1001';
@@ -1117,16 +1124,22 @@ io.on('connection', (socket) => {
 
   // Extract user identity from handshake auth token if available
   const clientToken = socket.handshake.auth?.token || socket.handshake.query?.token;
+  let isCollaborator = false;
+  let clientUserId = null;
   if (clientToken) {
     const verified = verifyToken(clientToken);
-    if (verified && verified.name) {
-      defaultName = verified.name;
-    }
-    if (verified && verified.role) {
-      defaultRole = verified.role;
-    }
-    if (verified && verified.sessionCode) {
-      defaultSession = verified.sessionCode;
+    if (verified) {
+      if (verified.name) {
+        defaultName = verified.name;
+      }
+      if (verified.role) {
+        defaultRole = verified.role;
+      }
+      if (verified.sessionCode) {
+        defaultSession = verified.sessionCode;
+      }
+      clientUserId = verified.userId;
+      isCollaborator = Boolean(verified.isCollaborator || verified.role === 'collaborator' || String(verified.userId || '').startsWith('collab_'));
     }
   }
 
@@ -1136,6 +1149,8 @@ io.on('connection', (socket) => {
   socket.data.name = defaultName;
   socket.data.sessionCode = initialSession;
   socket.data.role = defaultRole;
+  socket.data.isCollaborator = isCollaborator;
+  socket.data.userId = clientUserId;
 
   connectedAuditors.set(socket.id, {
     id: socket.id,
@@ -1180,6 +1195,13 @@ io.on('connection', (socket) => {
   socket.on('session:join', ({ sessionCode, userName }) => {
     if (!sessionCode) return;
     const cleanCode = String(sessionCode).trim().toUpperCase();
+
+    // Prevent collaborator from switching to another session
+    const isCollab = socket.data.isCollaborator || socket.data.role === 'collaborator' || String(socket.data.userId || '').startsWith('collab_');
+    if (isCollab && socket.data.sessionCode && socket.data.sessionCode !== cleanCode) {
+      return socket.emit('session:error', { error: 'Los auxiliares no tienen permiso para conectarse a otra sesión.' });
+    }
+
     const session = sharedSessions[cleanCode];
     if (!session) {
       return socket.emit('session:error', { error: `La sesión "${cleanCode}" no existe.` });
@@ -1475,6 +1497,11 @@ io.on('connection', (socket) => {
 
   // Clear session count
   socket.on('inventory:clear', (sessionCode) => {
+    const isCollab = socket.data.isCollaborator || socket.data.role === 'collaborator' || String(socket.data.userId || '').startsWith('collab_');
+    if (isCollab) {
+      return socket.emit('session:error', { error: 'Los auxiliares no tienen permiso para reiniciar el inventario.' });
+    }
+
     const targetCode = sessionCode ? String(sessionCode).trim().toUpperCase() : socket.data.sessionCode;
     if (!targetCode || !sharedSessions[targetCode]) return;
     const session = sharedSessions[targetCode];
@@ -1487,6 +1514,11 @@ io.on('connection', (socket) => {
 
   // Clear session history logs
   socket.on('history:clear', (sessionCode) => {
+    const isCollab = socket.data.isCollaborator || socket.data.role === 'collaborator' || String(socket.data.userId || '').startsWith('collab_');
+    if (isCollab) {
+      return socket.emit('session:error', { error: 'Los auxiliares no tienen permiso para borrar el historial.' });
+    }
+
     const targetCode = sessionCode ? String(sessionCode).trim().toUpperCase() : socket.data.sessionCode;
     if (!targetCode || !sharedSessions[targetCode]) return;
     const session = sharedSessions[targetCode];
@@ -1499,6 +1531,11 @@ io.on('connection', (socket) => {
 
   // Rename session
   socket.on('session:rename', (newName, sessionCode) => {
+    const isCollab = socket.data.isCollaborator || socket.data.role === 'collaborator' || String(socket.data.userId || '').startsWith('collab_');
+    if (isCollab) {
+      return socket.emit('session:error', { error: 'Los auxiliares no tienen permiso para renombrar la sesión.' });
+    }
+
     if (!newName) return;
     const targetCode = sessionCode ? String(sessionCode).trim().toUpperCase() : socket.data.sessionCode;
     if (!targetCode || !sharedSessions[targetCode]) return;
@@ -1516,6 +1553,11 @@ io.on('connection', (socket) => {
 
   // Restore entire session snapshot
   socket.on('session:restore', ({ items, name, sessionCode }) => {
+    const isCollab = socket.data.isCollaborator || socket.data.role === 'collaborator' || String(socket.data.userId || '').startsWith('collab_');
+    if (isCollab) {
+      return socket.emit('session:error', { error: 'Los auxiliares no tienen permiso para restaurar respaldos en la sesión.' });
+    }
+
     const targetCode = sessionCode ? String(sessionCode).trim().toUpperCase() : socket.data.sessionCode;
     if (!targetCode || !sharedSessions[targetCode]) return;
     const session = sharedSessions[targetCode];

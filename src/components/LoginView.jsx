@@ -11,7 +11,7 @@ import {
   Hash,
   Users
 } from 'lucide-react';
-import { loginUser } from '../utils/auth';
+import { loginUser, saveAuthSession } from '../utils/auth';
 import { collaboratorLoginApi } from '../utils/socket';
 
 export default function LoginView({ onLoginSuccess }) {
@@ -68,6 +68,7 @@ export default function LoginView({ onLoginSuccess }) {
         name: collabName.trim()
       });
       if (data && data.user) {
+        saveAuthSession(data.token, data.user);
         onLoginSuccess(data.user, data.token, data.activeSession);
       }
     } catch (err) {

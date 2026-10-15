@@ -86,7 +86,9 @@ export default function SessionSelectorModal({
     }
   };
 
-  if (!isOpen) return null;
+  const isCollaborator = currentUser?.isCollaborator || currentUser?.role === 'collaborator' || String(currentUser?.id || '').startsWith('collab_');
+
+  if (!isOpen || isCollaborator) return null;
 
   const handleCreateSession = async (e) => {
     e.preventDefault();

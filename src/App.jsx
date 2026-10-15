@@ -104,9 +104,10 @@ export default function App() {
     })();
   }, []);
 
-  // When user is authenticated but has no active session, prompt to create or pick session
+  // When user is authenticated but has no active session, prompt to create or pick session (Not for Collaborators)
   useEffect(() => {
-    if (!isAuthChecking && currentUser && !activeSession) {
+    const isCollab = currentUser?.isCollaborator || currentUser?.role === 'collaborator' || String(currentUser?.id || '').startsWith('collab_');
+    if (!isAuthChecking && currentUser && !activeSession && !isCollab) {
       setIsSessionSelectorOpen(true);
     }
   }, [isAuthChecking, currentUser, activeSession]);
@@ -868,16 +869,20 @@ export default function App() {
   };
 
   const handleLoginSuccess = (user, token, session) => {
+    if (token && user) {
+      saveAuthSession(token, user);
+    }
     setCurrentUser(user);
     if (user.name) {
       setCurrentUserName(user.name);
       localStorage.setItem(LOCAL_STORAGE_USER_NAME, user.name);
       emitSetAuditorName(user.name);
     }
+    const isCollab = user.isCollaborator || user.role === 'collaborator' || String(user.id || '').startsWith('collab_');
     if (session) {
       setActiveSession(session);
       setIsSessionSelectorOpen(false);
-    } else {
+    } else if (!isCollab) {
       setIsSessionSelectorOpen(true);
     }
     resetSocket();
@@ -922,6 +927,7 @@ export default function App() {
     return <LoginView onLoginSuccess={handleLoginSuccess} />;
   }
 
+  const isCollaborator = currentUser?.isCollaborator || currentUser?.role === 'collaborator' || String(currentUser?.id || '').startsWith('collab_');
   const isSessionExpired = activeSession?.expiresAt && new Date(activeSession.expiresAt).getTime() < Date.now();
 
   return (
@@ -950,7 +956,9 @@ export default function App() {
         currentUserName={currentUserName}
         currentUser={currentUser}
         activeSession={activeSession}
-        onOpenSessionSelector={() => setIsSessionSelectorOpen(true)}
+        onOpenSessionSelector={() => {
+          if (!isCollaborator) setIsSessionSelectorOpen(true);
+        }}
         onOpenUserManagement={() => setIsUserManagementOpen(true)}
         onLogout={handleLogout}
       />
@@ -961,16 +969,27 @@ export default function App() {
           <div className="flex items-center gap-2">
             <Clock className="w-4 h-4 text-rose-100 shrink-0 animate-pulse" />
             <span>
-              <strong>Esta sesión de conteo ha culminado su período de vigencia</strong> (venció el {new Date(activeSession.expiresAt).toLocaleDateString('es-DO')}). Para continuar, crea o selecciona una sesión vigente.
+              <strong>Esta sesión de conteo ha culminado su período de vigencia</strong> (venció el {new Date(activeSession.expiresAt).toLocaleDateString('es-DO')}).
+              {isCollaborator ? ' Comunícate con el líder del conteo para renovar el acceso.' : ' Para continuar, crea o selecciona una sesión vigente.'}
             </span>
           </div>
-          <button
-            type="button"
-            onClick={() => setIsSessionSelectorOpen(true)}
-            className="px-2.5 py-1 bg-white text-rose-700 hover:bg-rose-50 font-bold rounded-lg text-xs shadow-xs transition-colors shrink-0 ml-2"
-          >
-            Cambiar Sesión
-          </button>
+          {!isCollaborator ? (
+            <button
+              type="button"
+              onClick={() => setIsSessionSelectorOpen(true)}
+              className="px-2.5 py-1 bg-white text-rose-700 hover:bg-rose-50 font-bold rounded-lg text-xs shadow-xs transition-colors shrink-0 ml-2"
+            >
+              Cambiar Sesión
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="px-2.5 py-1 bg-white text-rose-700 hover:bg-rose-50 font-bold rounded-lg text-xs shadow-xs transition-colors shrink-0 ml-2"
+            >
+              Cerrar Sesión
+            </button>
+          )}
         </div>
       )}
 
@@ -1208,15 +1227,17 @@ export default function App() {
         totalItems={countedItems.length}
       />
 
-      {/* Multi-Session Selector / Room Picker Modal */}
-      <SessionSelectorModal
-        isOpen={isSessionSelectorOpen}
-        onClose={() => setIsSessionSelectorOpen(false)}
-        currentUser={currentUser}
-        activeSession={activeSession}
-        onSelectSession={handleSelectSession}
-        canClose={!!activeSession}
-      />
+      {/* Multi-Session Selector / Room Picker Modal (Never for Collaborators) */}
+      {!isCollaborator && (
+        <SessionSelectorModal
+          isOpen={isSessionSelectorOpen}
+          onClose={() => setIsSessionSelectorOpen(false)}
+          currentUser={currentUser}
+          activeSession={activeSession}
+          onSelectSession={handleSelectSession}
+          canClose={!!activeSession}
+        />
+      )}
 
       {/* Admin User Management Modal */}
       <UserManagementModal

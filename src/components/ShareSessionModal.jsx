@@ -44,6 +44,9 @@ export default function ShareSessionModal({
 
   useEffect(() => {
     if (isOpen) {
+      if (!isAdmin && activeTab === 'sync') {
+        setActiveTab('cloud');
+      }
       setMigrateSuccess(null);
       setMigrateError(null);
       // Fetch latest network info
@@ -51,7 +54,7 @@ export default function ShareSessionModal({
         if (res) setInfo(res);
       });
     }
-  }, [isOpen]);
+  }, [isOpen, isAdmin, activeTab]);
 
   const currentOrigin = typeof window !== 'undefined' ? window.location.origin : '';
   const isHostedOnRender = currentOrigin.includes('onrender.com');

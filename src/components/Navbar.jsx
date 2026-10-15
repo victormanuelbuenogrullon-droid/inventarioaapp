@@ -66,6 +66,8 @@ export default function Navbar({
   let isAccessExpiringSoon = false;
   let isAccessExpired = false;
 
+  const isCollaborator = currentUser?.isCollaborator || currentUser?.role === 'collaborator' || String(currentUser?.id || '').startsWith('collab_');
+
   const targetExpiration = activeSession?.expiresAt || currentUser?.expiresAt;
   if (targetExpiration) {
     const diffMs = new Date(targetExpiration).getTime() - Date.now();
@@ -110,16 +112,18 @@ export default function Navbar({
                 </div>
               )}
 
-              {/* Switch Session Button */}
-              <button
-                type="button"
-                onClick={onOpenSessionSelector}
-                className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition-all shadow-2xs"
-                title="Cambiar o crear otra sesión de conteo"
-              >
-                <ListOrdered className="w-3 h-3 text-slate-600" />
-                <span>Sesiones</span>
-              </button>
+              {/* Switch Session Button (Not available for Auxiliaries) */}
+              {!isCollaborator && (
+                <button
+                  type="button"
+                  onClick={onOpenSessionSelector}
+                  className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition-all shadow-2xs"
+                  title="Cambiar o crear otra sesión de conteo"
+                >
+                  <ListOrdered className="w-3 h-3 text-slate-600" />
+                  <span>Sesiones</span>
+                </button>
+              )}
 
               {/* Real-time Collaboration Live Pill */}
               <button
@@ -152,14 +156,23 @@ export default function Navbar({
             </div>
 
             <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5">
-              <input
-                type="text"
-                value={sessionName}
-                onChange={(e) => setSessionName(e.target.value)}
-                placeholder="Nombre de sesión"
-                className="bg-transparent border-b border-dashed border-slate-300 hover:border-slate-500 focus:border-slate-800 focus:outline-none text-slate-700 px-1 py-0.5 max-w-[170px] text-[11px] font-medium"
-                title="Haz clic para renombrar la sesión compartida"
-              />
+              {isCollaborator ? (
+                <span 
+                  className="text-slate-700 px-1 py-0.5 max-w-[170px] truncate text-[11px] font-semibold select-none"
+                  title={sessionName}
+                >
+                  {sessionName}
+                </span>
+              ) : (
+                <input
+                  type="text"
+                  value={sessionName}
+                  onChange={(e) => setSessionName(e.target.value)}
+                  placeholder="Nombre de sesión"
+                  className="bg-transparent border-b border-dashed border-slate-300 hover:border-slate-500 focus:border-slate-800 focus:outline-none text-slate-700 px-1 py-0.5 max-w-[170px] text-[11px] font-medium"
+                  title="Haz clic para renombrar la sesión compartida"
+                />
+              )}
               {currentUserName && (
                 <span className="text-[10px] text-slate-400">
                   • Estación: <strong className="text-slate-600">{currentUserName}</strong>
@@ -255,15 +268,17 @@ export default function Navbar({
             {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
           </button>
 
-          {/* Guardar / Respaldos */}
-          <button
-            onClick={onOpenSessionManager}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-white shadow-sm transition-all"
-            title="Guardar punto de restauración o recuperar sesiones anteriores"
-          >
-            <Save className="w-4 h-4 text-slate-300" />
-            <span className="hidden sm:inline">Guardar / Respaldos</span>
-          </button>
+          {/* Guardar / Respaldos (Not for Auxiliaries) */}
+          {!isCollaborator && (
+            <button
+              onClick={onOpenSessionManager}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-white shadow-sm transition-all"
+              title="Guardar punto de restauración o recuperar sesiones anteriores"
+            >
+              <Save className="w-4 h-4 text-slate-300" />
+              <span className="hidden sm:inline">Guardar / Respaldos</span>
+            </button>
+          )}
 
           {/* Export to Excel */}
           {activeView === 'inventory' && (
@@ -291,8 +306,8 @@ export default function Navbar({
             </button>
           )}
 
-          {/* Reset / Clear */}
-          {activeView === 'inventory' && (
+          {/* Reset / Clear (Not for Auxiliaries) */}
+          {activeView === 'inventory' && !isCollaborator && (
             <button
               onClick={onClearCount}
               disabled={totalItemsCounted === 0}
@@ -329,7 +344,7 @@ export default function Navbar({
                       ? 'bg-amber-50 border-amber-300 ring-1 ring-amber-300'
                       : 'bg-slate-50 border-slate-200'
                 }`}
-                title={`Sesión: @${currentUser.username} (${currentUser.role === 'admin' ? 'Administrador' : 'Auditor'})${
+                title={`Sesión: @${currentUser.username} (${currentUser.role === 'admin' ? 'Administrador' : isCollaborator ? 'Auxiliar' : 'Auditor'})${
                   currentUser.expiresAt ? ` • Vence el ${new Date(currentUser.expiresAt).toLocaleDateString()}` : ' • Acceso Permanente'
                 }`}
               >
@@ -345,7 +360,7 @@ export default function Navbar({
                       {currentUser.name}
                     </span>
                     <span className="text-[10px] text-slate-400 capitalize hidden lg:inline">
-                      ({currentUser.role === 'admin' ? 'Admin' : 'Auditor'})
+                      ({currentUser.role === 'admin' ? 'Admin' : isCollaborator ? 'Auxiliar' : 'Auditor'})
                     </span>
                   </div>
 
