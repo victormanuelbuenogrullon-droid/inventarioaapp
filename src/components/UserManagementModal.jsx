@@ -142,10 +142,11 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
     setIsUpdatingPassword(true);
     try {
       await updateUserPassword(passwordChangeTarget.id, newCustomPassword);
-      setSuccessMessage(`Contraseña de @${passwordChangeTarget.username} actualizada con éxito.`);
+      setSuccessMessage(`✅ Contraseña de @${passwordChangeTarget.username} actualizada con éxito.`);
       setPasswordChangeTarget(null);
       setNewCustomPassword('');
-      setTimeout(() => setSuccessMessage(null), 3000);
+      await loadUsers();
+      setTimeout(() => setSuccessMessage(null), 3500);
     } catch (err) {
       alert(err.message || 'Error al actualizar contraseña');
     } finally {

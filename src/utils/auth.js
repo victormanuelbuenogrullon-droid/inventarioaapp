@@ -2,6 +2,7 @@ import { getServerBaseUrl } from './socket';
 
 const TOKEN_KEY = 'inventariosapp_token_v1';
 const USER_KEY = 'inventariosapp_user_v1';
+const USERS_BACKUP_KEY = 'inventariosapp_users_backup';
 
 export function getStoredToken() {
   return localStorage.getItem(TOKEN_KEY) || '';
@@ -13,6 +14,25 @@ export function getStoredUser() {
     return raw ? JSON.parse(raw) : null;
   } catch {
     return null;
+  }
+}
+
+export function getStoredUsersBackup() {
+  try {
+    const raw = localStorage.getItem(USERS_BACKUP_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveUsersBackup(users) {
+  if (Array.isArray(users) && users.length > 0) {
+    try {
+      localStorage.setItem(USERS_BACKUP_KEY, JSON.stringify(users));
+    } catch (e) {
+      console.warn('Error guardando respaldo de usuarios:', e);
+    }
   }
 }
 
@@ -28,10 +48,12 @@ export function clearAuthSession() {
 
 export async function loginUser(username, password) {
   const baseUrl = getServerBaseUrl();
+  const backupUsers = getStoredUsersBackup();
+
   const response = await fetch(`${baseUrl}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password })
+    body: JSON.stringify({ username, password, backupUsers })
   });
 
   const data = await response.json().catch(() => ({}));
@@ -40,6 +62,10 @@ export async function loginUser(username, password) {
   }
 
   saveAuthSession(data.token, data.user);
+  if (data.usersBackup) {
+    saveUsersBackup(data.usersBackup);
+  }
+
   return data;
 }
 
@@ -68,7 +94,6 @@ export async function fetchCurrentUser() {
     return null;
   } catch (err) {
     console.warn('Error al verificar sesión actual:', err);
-    // Return stored user if offline/temporary network blip
     return getStoredUser();
   }
 }
@@ -86,6 +111,17 @@ export async function fetchAllUsers() {
   if (!response.ok) {
     throw new Error(data.error || 'Error al obtener usuarios');
   }
+
+  // Also silently fetch full backup if admin
+  fetch(`${baseUrl}/api/users/backup`, {
+    headers: { 'Authorization': `Bearer ${token}` }
+  })
+    .then((res) => (res.ok ? res.json() : null))
+    .then((backup) => {
+      if (backup) saveUsersBackup(backup);
+    })
+    .catch(() => {});
+
   return data;
 }
 
@@ -105,6 +141,11 @@ export async function createNewUser({ username, password, name, role, accessDays
   if (!response.ok) {
     throw new Error(data.error || 'Error al crear usuario');
   }
+
+  if (data.usersBackup) {
+    saveUsersBackup(data.usersBackup);
+  }
+
   return data.user;
 }
 
@@ -124,6 +165,11 @@ export async function updateUserAccess(userId, accessDays) {
   if (!response.ok) {
     throw new Error(data.error || 'Error al actualizar vigencia de acceso');
   }
+
+  if (data.usersBackup) {
+    saveUsersBackup(data.usersBackup);
+  }
+
   return data.user;
 }
 
@@ -141,6 +187,11 @@ export async function deleteUser(userId) {
   if (!response.ok) {
     throw new Error(data.error || 'Error al eliminar usuario');
   }
+
+  if (data.usersBackup) {
+    saveUsersBackup(data.usersBackup);
+  }
+
   return data;
 }
 
@@ -160,5 +211,10 @@ export async function updateUserPassword(userId, newPassword) {
   if (!response.ok) {
     throw new Error(data.error || 'Error al cambiar contraseña');
   }
+
+  if (data.usersBackup) {
+    saveUsersBackup(data.usersBackup);
+  }
+
   return data;
 }

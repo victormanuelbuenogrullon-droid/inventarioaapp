@@ -23,3 +23,7 @@ dist-ssr
 *.sln
 *.sw?
 cloudflared.exe
+
+# Runtime database files
+data/users.json
+data/inventory_state.json

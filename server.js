@@ -253,7 +253,8 @@ try {
 
   // If no users exist, initialize default admin
   if (sharedUsers.length === 0) {
-    const { hash, salt } = hashPassword('admin');
+    const initialAdminPass = process.env.ADMIN_PASSWORD || 'admin';
+    const { hash, salt } = hashPassword(initialAdminPass);
     sharedUsers = [
       {
         id: 'u_admin',
@@ -266,7 +267,19 @@ try {
       }
     ];
     persistUsersToDisk();
-    console.log('[Auth] Administrador por defecto inicializado: (usuario: admin / contraseña: admin)');
+    console.log('[Auth] Administrador por defecto inicializado.');
+  }
+
+  // If ADMIN_PASSWORD env var is set, enforce it for the admin user
+  if (process.env.ADMIN_PASSWORD) {
+    const adminUser = sharedUsers.find((u) => u.username.toLowerCase() === 'admin');
+    if (adminUser) {
+      const { hash, salt } = hashPassword(process.env.ADMIN_PASSWORD);
+      adminUser.passwordHash = hash;
+      adminUser.salt = salt;
+      persistUsersToDisk();
+      console.log('[Auth] Contraseña de admin actualizada según variable de entorno ADMIN_PASSWORD.');
+    }
   }
 } catch (err) {
   console.error('[Auth] Error al inicializar usuarios:', err);
@@ -325,13 +338,27 @@ function getItemKey(p) {
 
 // Login
 app.post('/api/auth/login', (req, res) => {
-  const { username, password } = req.body || {};
+  const { username, password, backupUsers } = req.body || {};
   if (!username || !password) {
     return res.status(400).json({ error: 'Ingresa tu usuario y contraseña' });
   }
 
   const cleanUser = String(username).trim().toLowerCase();
-  const user = sharedUsers.find((u) => u.username.toLowerCase() === cleanUser);
+  let user = sharedUsers.find((u) => u.username.toLowerCase() === cleanUser);
+
+  // If user not found or password doesn't match current server state,
+  // check if backupUsers sent from client is valid (e.g. after a Render container restart/wipe)
+  if ((!user || !verifyPassword(String(password), user.passwordHash, user.salt)) && Array.isArray(backupUsers) && backupUsers.length > 0) {
+    const backupTarget = backupUsers.find((u) => u.username && u.username.toLowerCase() === cleanUser);
+    if (backupTarget && backupTarget.passwordHash && backupTarget.salt) {
+      if (verifyPassword(String(password), backupTarget.passwordHash, backupTarget.salt)) {
+        console.log(`[Auth] Restaurando usuarios desde respaldo seguro del cliente tras reinicio.`);
+        sharedUsers = backupUsers;
+        persistUsersToDisk();
+        user = backupTarget;
+      }
+    }
+  }
 
   if (!user || !verifyPassword(String(password), user.passwordHash, user.salt)) {
     return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
@@ -360,7 +387,8 @@ app.post('/api/auth/login', (req, res) => {
       role: user.role,
       accessDays: user.accessDays || null,
       expiresAt: user.expiresAt || null
-    }
+    },
+    usersBackup: user.role === 'admin' ? sharedUsers : undefined
   });
 });
 
@@ -456,7 +484,8 @@ app.post('/api/users', requireAdmin, (req, res) => {
       expiresAt: newUser.expiresAt,
       isExpired: false,
       createdAt: newUser.createdAt
-    }
+    },
+    usersBackup: sharedUsers
   });
 });
 
@@ -493,7 +522,8 @@ app.put('/api/users/:id/access', requireAdmin, (req, res) => {
       accessDays: target.accessDays,
       expiresAt: target.expiresAt,
       isExpired: isUserExpired(target)
-    }
+    },
+    usersBackup: sharedUsers
   });
 });
 
@@ -520,7 +550,7 @@ app.delete('/api/users/:id', requireAdmin, (req, res) => {
   persistUsersToDisk();
 
   console.log(`[Auth] Usuario ${target.username} eliminado por ${req.user.username}`);
-  res.json({ success: true, message: 'Usuario eliminado correctamente' });
+  res.json({ success: true, message: 'Usuario eliminado correctamente', usersBackup: sharedUsers });
 });
 
 // Change user password (Admin can change any, user can change own)
@@ -546,8 +576,29 @@ app.put('/api/users/:id/password', requireAuth, (req, res) => {
   target.salt = salt;
   persistUsersToDisk();
 
-  console.log(`[Auth] Contraseña de ${target.username} actualizada.`);
-  res.json({ success: true, message: 'Contraseña actualizada con éxito.' });
+  console.log(`[Auth] Contraseña de ${target.username} actualizada con éxito.`);
+  res.json({
+    success: true,
+    message: 'Contraseña actualizada con éxito.',
+    usersBackup: req.user.role === 'admin' ? sharedUsers : undefined
+  });
+});
+
+// Export full users backup for offline persistence (Admin only)
+app.get('/api/users/backup', requireAdmin, (req, res) => {
+  res.json(sharedUsers);
+});
+
+// Restore full users backup (Admin only)
+app.post('/api/users/restore', requireAdmin, (req, res) => {
+  const { users } = req.body || {};
+  if (Array.isArray(users) && users.length > 0) {
+    sharedUsers = users;
+    persistUsersToDisk();
+    console.log(`[Auth] Respaldo de ${users.length} usuarios restaurado manualmente.`);
+    return res.json({ success: true, total: users.length });
+  }
+  res.status(400).json({ error: 'Formato de usuarios inválido' });
 });
 
 // ==========================================
