@@ -1154,10 +1154,11 @@ export default function App() {
       />
 
       <SessionManagerModal
-        isOpen={isSessionManagerOpen}
+        isOpen={isSessionManagerOpen && !isCollaborator}
         onClose={() => setIsSessionManagerOpen(false)}
         currentItems={countedItems}
         currentSessionName={sessionName}
+        activeSession={activeSession}
         onLoadSession={handleLoadSession}
       />
 

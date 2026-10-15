@@ -7,7 +7,10 @@ import {
   UploadCloud, 
   X, 
   Check, 
-  Clock 
+  Clock,
+  Hash,
+  Cloud,
+  Laptop
 } from 'lucide-react';
 import { 
   saveSessionToDB, 
@@ -15,6 +18,12 @@ import {
   deleteSessionFromDB, 
   downloadBackupJsonFile 
 } from '../utils/db';
+import {
+  fetchSessionBackupsApi,
+  createSessionBackupApi,
+  restoreSessionBackupApi,
+  deleteSessionBackupApi
+} from '../utils/socket';
 import { formatCurrency, formatNumber } from '../utils/export';
 
 export default function SessionManagerModal({
@@ -22,6 +31,7 @@ export default function SessionManagerModal({
   onClose,
   currentItems,
   currentSessionName,
+  activeSession,
   onLoadSession
 }) {
   const [activeTab, setActiveTab] = useState('save');
@@ -33,22 +43,49 @@ export default function SessionManagerModal({
   const [successMessage, setSuccessMessage] = useState(null);
   const fileInputRef = useRef(null);
 
+  const sessionCode = activeSession?.code || '';
+
   useEffect(() => {
     if (isOpen) {
-      setSaveName(currentSessionName || `Inventario - ${new Date().toLocaleDateString('es-DO')}`);
+      setSaveName(currentSessionName || (sessionCode ? `Inventario ${sessionCode}` : `Inventario - ${new Date().toLocaleDateString('es-DO')}`));
       setSaveNote('');
       setSuccessMessage(null);
       loadSavedSessions();
     }
-  }, [isOpen, currentSessionName]);
+  }, [isOpen, currentSessionName, sessionCode]);
 
   const loadSavedSessions = async () => {
     setIsLoading(true);
     try {
-      const list = await getAllSessionsFromDB();
-      setSavedSessions(list);
+      // 1. Fetch server backups for this session
+      let serverBackups = [];
+      if (sessionCode) {
+        try {
+          serverBackups = await fetchSessionBackupsApi(sessionCode);
+        } catch (e) {
+          console.warn('Could not fetch session backups from server:', e);
+        }
+      }
+
+      // 2. Fetch local backups for this session
+      const localBackups = await getAllSessionsFromDB(sessionCode);
+
+      // 3. Merge server and local backups
+      const mergedMap = new Map();
+      serverBackups.forEach((b) => mergedMap.set(b.id, { ...b, source: 'server' }));
+      localBackups.forEach((b) => {
+        if (!mergedMap.has(b.id)) {
+          mergedMap.set(b.id, { ...b, source: 'local' });
+        }
+      });
+
+      const combined = Array.from(mergedMap.values()).sort(
+        (a, b) => new Date(b.savedAt) - new Date(a.savedAt)
+      );
+
+      setSavedSessions(combined);
     } catch (err) {
-      console.error('Error loading sessions:', err);
+      console.error('Error loading session backups:', err);
     } finally {
       setIsLoading(false);
     }
@@ -72,11 +109,12 @@ export default function SessionManagerModal({
 
   const handleSaveCurrentSession = async (e) => {
     e?.preventDefault();
-    const finalName = saveName.trim() || `Inventario - ${new Date().toLocaleString('es-DO')}`;
-    const sessionId = `session_${Date.now()}`;
+    const finalName = saveName.trim() || `Inventario ${sessionCode ? sessionCode + ' ' : ''}- ${new Date().toLocaleString('es-DO')}`;
+    const sessionId = `bk_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
 
     const sessionPayload = {
       id: sessionId,
+      sessionCode,
       name: finalName,
       note: saveNote.trim(),
       items: currentItems,
@@ -88,38 +126,65 @@ export default function SessionManagerModal({
     };
 
     try {
+      // Save locally
       await saveSessionToDB(sessionPayload);
+
+      // Save to server session if code is available
+      if (sessionCode) {
+        try {
+          await createSessionBackupApi(sessionCode, sessionPayload);
+        } catch (serverErr) {
+          console.warn('Error saving session backup on server:', serverErr);
+        }
+      }
+
       if (alsoDownloadJson) {
         downloadBackupJsonFile(sessionPayload);
       }
-      setSuccessMessage(`✅ Sesión "${finalName}" guardada correctamente.`);
+      setSuccessMessage(`✅ Respaldo "${finalName}" guardado para la sesión ${sessionCode || 'actual'}.`);
       await loadSavedSessions();
       setTimeout(() => {
         setSuccessMessage(null);
       }, 3000);
     } catch (err) {
       console.error('Save error:', err);
-      alert('Error al guardar la sesión: ' + err.message);
+      alert('Error al guardar el respaldo: ' + err.message);
     }
   };
 
-  const handleRestoreSession = (session) => {
-    if (currentItems.length > 0) {
-      const confirm = window.confirm(
-        `¿Deseas restaurar la sesión "${session.name}"? Esto reemplazará el listado actual de la pantalla con los ${session.items?.length || 0} productos guardados.`
-      );
-      if (!confirm) return;
-    }
-
-    onLoadSession(session.items || [], session.name);
-    onClose();
-  };
-
-  const handleDeleteSession = async (sessionId, name) => {
-    const confirm = window.confirm(`¿Seguro que deseas eliminar el respaldo guardado "${name}"?`);
+  const handleRestoreSession = async (session) => {
+    const confirm = window.confirm(
+      `¿Deseas restaurar el respaldo "${session.name}" en la sesión "${sessionCode || 'actual'}"?\n\nEsto reemplazará el listado de este conteo con los ${session.items?.length || 0} productos guardados.`
+    );
     if (!confirm) return;
 
     try {
+      if (sessionCode && session.source === 'server') {
+        try {
+          await restoreSessionBackupApi(sessionCode, session.id);
+        } catch (serverErr) {
+          console.warn('Error al restaurar respaldo en servidor:', serverErr);
+        }
+      }
+      onLoadSession(session.items || [], session.name);
+      onClose();
+    } catch (err) {
+      alert('Error restaurando respaldo: ' + err.message);
+    }
+  };
+
+  const handleDeleteSession = async (sessionId, name) => {
+    const confirm = window.confirm(`¿Seguro que deseas eliminar el respaldo "${name}" de la sesión ${sessionCode || 'actual'}?`);
+    if (!confirm) return;
+
+    try {
+      if (sessionCode) {
+        try {
+          await deleteSessionBackupApi(sessionCode, sessionId);
+        } catch (err) {
+          console.warn('Error eliminando en servidor:', err);
+        }
+      }
       await deleteSessionFromDB(sessionId);
       await loadSavedSessions();
     } catch (err) {
@@ -140,16 +205,24 @@ export default function SessionManagerModal({
         }
 
         const confirm = window.confirm(
-          `Se encontró el respaldo "${parsed.name || file.name}" con ${parsed.items.length} productos contados. ¿Deseas cargarlo ahora?`
+          `Se encontró el respaldo "${parsed.name || file.name}" con ${parsed.items.length} productos contados. ¿Deseas cargarlo en la sesión ${sessionCode || 'actual'}?`
         );
         if (confirm) {
-          const newId = `session_imported_${Date.now()}`;
+          const newId = `bk_imported_${Date.now()}`;
           const importedPayload = {
             ...parsed,
             id: newId,
+            sessionCode,
             savedAt: new Date().toISOString()
           };
           await saveSessionToDB(importedPayload);
+          if (sessionCode) {
+            try {
+              await createSessionBackupApi(sessionCode, importedPayload);
+            } catch (err) {
+              console.warn('Could not save imported backup to server:', err);
+            }
+          }
           onLoadSession(parsed.items, parsed.name || 'Inventario Restaurado');
           onClose();
         }
@@ -167,12 +240,24 @@ export default function SessionManagerModal({
         {/* Modal Header */}
         <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/60">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-slate-100 text-slate-700">
+            <div className="p-2 rounded-xl bg-slate-800 text-white shadow-xs">
               <Save className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-base font-bold text-slate-900">Guardar y Recuperar Respaldos</h3>
-              <p className="text-xs text-slate-500">Guarda puntos de restauración de tu trabajo para recuperarlos cuando quieras</p>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-bold text-slate-900">Respaldos de la Sesión</h3>
+                {sessionCode && (
+                  <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 font-bold text-xs">
+                    <Hash className="w-3 h-3 text-indigo-500" />
+                    <span>{sessionCode}</span>
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {sessionCode 
+                  ? `Puntos de restauración independientes y exclusivos de la sesión "${activeSession?.name || currentSessionName}"`
+                  : 'Guarda puntos de restauración de tu trabajo para recuperarlos cuando quieras'}
+              </p>
             </div>
           </div>
           <button
@@ -190,12 +275,12 @@ export default function SessionManagerModal({
             onClick={() => setActiveTab('save')}
             className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all ${
               activeTab === 'save'
-                ? 'border-slate-800 text-slate-900 bg-white rounded-t-lg shadow-xs'
+                ? 'border-indigo-600 text-indigo-700 bg-white rounded-t-lg shadow-xs'
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
             <Save className="w-4 h-4" />
-            <span>Guardar Sesión Actual</span>
+            <span>Guardar en esta Sesión</span>
           </button>
 
           <button
@@ -203,12 +288,12 @@ export default function SessionManagerModal({
             onClick={() => setActiveTab('history')}
             className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all ${
               activeTab === 'history'
-                ? 'border-slate-800 text-slate-900 bg-white rounded-t-lg shadow-xs'
+                ? 'border-indigo-600 text-indigo-700 bg-white rounded-t-lg shadow-xs'
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
             <FolderOpen className="w-4 h-4" />
-            <span>Recuperar Sesión Guardada ({savedSessions.length})</span>
+            <span>Respaldos Guardados ({savedSessions.length})</span>
           </button>
         </div>
 
@@ -337,7 +422,12 @@ export default function SessionManagerModal({
               {savedSessions.length === 0 ? (
                 <div className="p-8 text-center text-slate-400 text-xs border border-dashed border-slate-200 rounded-xl">
                   <FolderOpen className="w-8 h-8 text-slate-400 mx-auto mb-2 opacity-60" />
-                  No tienes sesiones guardadas todavía. Guarda tu primera sesión en la pestaña anterior.
+                  <p className="font-semibold text-slate-600">
+                    No hay respaldos guardados para la sesión {sessionCode || 'actual'}.
+                  </p>
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Crea un punto de restauración en la pestaña anterior para guardar una copia de este inventario.
+                  </p>
                 </div>
               ) : (
                 <div className="space-y-2.5">
@@ -347,16 +437,42 @@ export default function SessionManagerModal({
                       className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 hover:border-slate-300 transition-all flex flex-wrap items-center justify-between gap-3"
                     >
                       <div className="flex-1 min-w-[200px]">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <h4 className="font-bold text-slate-900 text-sm">{sess.name}</h4>
+                          
+                          {sess.sessionCode && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 font-extrabold flex items-center gap-0.5">
+                              <Hash className="w-2.5 h-2.5 text-indigo-500" />
+                              {sess.sessionCode}
+                            </span>
+                          )}
+
+                          {sess.source === 'server' ? (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold flex items-center gap-1" title="Sincronizado en el servidor compartido">
+                              <Cloud className="w-2.5 h-2.5 text-emerald-600" />
+                              Nube
+                            </span>
+                          ) : (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200 font-semibold flex items-center gap-1" title="Guardado en este navegador">
+                              <Laptop className="w-2.5 h-2.5 text-slate-500" />
+                              Local
+                            </span>
+                          )}
+
                           <span className="text-[10px] px-1.5 py-0.5 rounded bg-white text-slate-500 border border-slate-200 flex items-center gap-1">
-                            <Clock className="w-3 h-3" />
+                            <Clock className="w-3 h-3 text-slate-400" />
                             {new Date(sess.savedAt).toLocaleString('es-DO')}
                           </span>
+
+                          {sess.savedBy && (
+                            <span className="text-[10px] text-slate-400 font-medium">
+                              por {sess.savedBy}
+                            </span>
+                          )}
                         </div>
                         
                         {sess.note && (
-                          <p className="text-xs text-slate-500 mt-0.5 italic">"{sess.note}"</p>
+                          <p className="text-xs text-slate-500 mt-1 italic">"{sess.note}"</p>
                         )}
 
                         <div className="flex items-center gap-3 mt-1.5 text-xs">
@@ -410,7 +526,7 @@ export default function SessionManagerModal({
 
         {/* Modal Footer */}
         <div className="px-6 py-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-          <span>Los respaldos se almacenan de forma permanente.</span>
+          <span>Los respaldos están aislados por sesión y se sincronizan de forma segura.</span>
           <button
             onClick={onClose}
             className="px-4 py-1.5 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-700 font-medium"

@@ -591,14 +591,18 @@ export async function saveSessionToDB(session) {
   });
 }
 
-export async function getAllSessionsFromDB() {
+export async function getAllSessionsFromDB(sessionCode = null) {
   const db = await openDB();
   return new Promise((resolve) => {
     const tx = db.transaction(['sessions'], 'readonly');
     const store = tx.objectStore('sessions');
     const req = store.getAll();
     req.onsuccess = () => {
-      const list = req.result || [];
+      let list = req.result || [];
+      if (sessionCode) {
+        const clean = String(sessionCode).trim().toUpperCase();
+        list = list.filter((s) => s.sessionCode && String(s.sessionCode).trim().toUpperCase() === clean);
+      }
       list.sort((a, b) => new Date(b.savedAt) - new Date(a.savedAt));
       resolve(list);
     };

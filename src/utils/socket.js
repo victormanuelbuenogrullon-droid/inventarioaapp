@@ -168,6 +168,78 @@ export async function deleteSessionApi(code) {
   return data;
 }
 
+// Session-Isolated Backups API calls
+export async function fetchSessionBackupsApi(code) {
+  if (!code) return [];
+  const baseUrl = getServerBaseUrl();
+  const token = localStorage.getItem('inventariosapp_token_v1');
+  const clean = String(code).trim().toUpperCase();
+  const response = await fetch(`${baseUrl}/api/sessions/${encodeURIComponent(clean)}/backups`, {
+    headers: { 'Authorization': `Bearer ${token}` }
+  });
+  const data = await response.json().catch(() => ([]));
+  if (!response.ok) {
+    throw new Error(data.error || 'Error al obtener respaldos de la sesión');
+  }
+  return Array.isArray(data) ? data : [];
+}
+
+export async function createSessionBackupApi(code, backupPayload) {
+  if (!code) return null;
+  const baseUrl = getServerBaseUrl();
+  const token = localStorage.getItem('inventariosapp_token_v1');
+  const clean = String(code).trim().toUpperCase();
+  const response = await fetch(`${baseUrl}/api/sessions/${encodeURIComponent(clean)}/backups`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    },
+    body: JSON.stringify(backupPayload)
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || 'Error al guardar respaldo en el servidor');
+  }
+  return data.backup;
+}
+
+export async function restoreSessionBackupApi(code, backupId) {
+  if (!code || !backupId) return null;
+  const baseUrl = getServerBaseUrl();
+  const token = localStorage.getItem('inventariosapp_token_v1');
+  const clean = String(code).trim().toUpperCase();
+  const response = await fetch(`${baseUrl}/api/sessions/${encodeURIComponent(clean)}/backups/${encodeURIComponent(backupId)}/restore`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`
+    }
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || 'Error al restaurar respaldo en el servidor');
+  }
+  return data;
+}
+
+export async function deleteSessionBackupApi(code, backupId) {
+  if (!code || !backupId) return null;
+  const baseUrl = getServerBaseUrl();
+  const token = localStorage.getItem('inventariosapp_token_v1');
+  const clean = String(code).trim().toUpperCase();
+  const response = await fetch(`${baseUrl}/api/sessions/${encodeURIComponent(clean)}/backups/${encodeURIComponent(backupId)}`, {
+    method: 'DELETE',
+    headers: {
+      'Authorization': `Bearer ${token}`
+    }
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || 'Error al eliminar respaldo en el servidor');
+  }
+  return data;
+}
+
 export async function collaboratorLoginApi({ sessionCode, name }) {
   const baseUrl = getServerBaseUrl();
   const response = await fetch(`${baseUrl}/api/auth/collaborator-login`, {

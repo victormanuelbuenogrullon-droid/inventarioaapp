@@ -172,6 +172,9 @@ try {
     const parsedSessions = JSON.parse(rawSessions);
     if (parsedSessions && typeof parsedSessions === 'object') {
       sharedSessions = parsedSessions;
+      Object.values(sharedSessions).forEach((s) => {
+        if (!Array.isArray(s.backups)) s.backups = [];
+      });
       console.log(`[Storage] ${Object.keys(sharedSessions).length} sesiones de inventario cargadas desde disco.`);
     }
   }
@@ -201,6 +204,7 @@ try {
       expiresAt: null,
       countedItems: sharedState.countedItems || [],
       historyLogs: sharedState.historyLogs || [],
+      backups: [],
       lastUpdated: sharedState.lastUpdated || new Date().toISOString()
     };
     persistSessionsToDisk();
@@ -753,6 +757,7 @@ app.post('/api/sessions/create', requireAuth, (req, res) => {
     expiresAt: req.user.expiresAt || null, // Inherits creator's expiration!
     countedItems: [],
     historyLogs: [],
+    backups: [],
     lastUpdated: new Date().toISOString()
   };
 
@@ -857,6 +862,139 @@ app.delete('/api/sessions/:code', requireAuth, (req, res) => {
   persistSessionsToDisk();
   console.log(`[Sessions] Sesión ${cleanCode} eliminada por ${req.user.username}`);
   res.json({ success: true, message: `Sesión ${cleanCode} eliminada correctamente.` });
+});
+
+// ==========================================
+// SESSION-ISOLATED BACKUPS (PUNTOS DE RESTAURACIÓN)
+// ==========================================
+
+// Get backups for a specific session
+app.get('/api/sessions/:code/backups', requireAuth, (req, res) => {
+  const { code } = req.params;
+  const cleanCode = String(code).trim().toUpperCase();
+  const isCollab = req.user.isCollaborator || req.user.role === 'collaborator' || String(req.user.id).startsWith('collab_');
+  if (isCollab && req.user.sessionCode && req.user.sessionCode !== cleanCode) {
+    return res.status(403).json({ error: 'Los auxiliares solo tienen acceso a la sesión asignada.' });
+  }
+
+  const session = sharedSessions[cleanCode];
+  if (!session) {
+    return res.status(404).json({ error: `La sesión "${cleanCode}" no existe.` });
+  }
+
+  const backups = Array.isArray(session.backups) ? session.backups : [];
+  res.json(backups);
+});
+
+// Create a new backup snapshot for a specific session
+app.post('/api/sessions/:code/backups', requireAuth, (req, res) => {
+  const isCollab = req.user.isCollaborator || req.user.role === 'collaborator' || String(req.user.id).startsWith('collab_');
+  if (isCollab) {
+    return res.status(403).json({ error: 'Los auxiliares no tienen permiso para gestionar respaldos.' });
+  }
+
+  const { code } = req.params;
+  const cleanCode = String(code).trim().toUpperCase();
+  const session = sharedSessions[cleanCode];
+  if (!session) {
+    return res.status(404).json({ error: `La sesión "${cleanCode}" no existe.` });
+  }
+
+  if (isSessionExpired(session)) {
+    return res.status(403).json({ error: 'Esta sesión ha culminado su período de vigencia.' });
+  }
+
+  const { name, note, items, totalSkus, totalUnits, totalCostInvestment, totalRetailPrice } = req.body || {};
+  const backupId = `bk_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+  const backupName = (name && String(name).trim()) || `Respaldo ${cleanCode} - ${new Date().toLocaleDateString('es-DO')}`;
+
+  const backupItem = {
+    id: backupId,
+    sessionCode: cleanCode,
+    name: backupName,
+    note: (note && String(note).trim()) || '',
+    items: Array.isArray(items) ? items : (session.countedItems || []),
+    totalSkus: totalSkus !== undefined ? totalSkus : (session.countedItems || []).length,
+    totalUnits: totalUnits !== undefined ? totalUnits : 0,
+    totalCostInvestment: totalCostInvestment !== undefined ? totalCostInvestment : 0,
+    totalRetailPrice: totalRetailPrice !== undefined ? totalRetailPrice : 0,
+    savedAt: new Date().toISOString(),
+    savedBy: req.user.name || req.user.username
+  };
+
+  if (!Array.isArray(session.backups)) session.backups = [];
+  session.backups.unshift(backupItem);
+  persistSessionsToDisk();
+
+  console.log(`[Backups] Nuevo respaldo creado en sesión ${cleanCode}: "${backupName}" por ${req.user.username}`);
+  res.json({ success: true, backup: backupItem });
+});
+
+// Restore a backup snapshot for a specific session
+app.post('/api/sessions/:code/backups/:backupId/restore', requireAuth, (req, res) => {
+  const isCollab = req.user.isCollaborator || req.user.role === 'collaborator' || String(req.user.id).startsWith('collab_');
+  if (isCollab) {
+    return res.status(403).json({ error: 'Los auxiliares no tienen permiso para restaurar respaldos.' });
+  }
+
+  const { code, backupId } = req.params;
+  const cleanCode = String(code).trim().toUpperCase();
+  const session = sharedSessions[cleanCode];
+  if (!session) {
+    return res.status(404).json({ error: `La sesión "${cleanCode}" no existe.` });
+  }
+
+  if (isSessionExpired(session)) {
+    return res.status(403).json({ error: 'Esta sesión ha culminado su período de vigencia.' });
+  }
+
+  if (!Array.isArray(session.backups)) session.backups = [];
+  const backup = session.backups.find((b) => b.id === backupId);
+  if (!backup) {
+    return res.status(404).json({ error: 'El respaldo solicitado no fue encontrado en esta sesión.' });
+  }
+
+  session.countedItems = Array.isArray(backup.items) ? [...backup.items] : [];
+  session.lastUpdated = new Date().toISOString();
+  persistSessionsToDisk();
+
+  // Broadcast restoration to all clients in this session room
+  io.to(cleanCode).emit('session:restored', {
+    sessionCode: cleanCode,
+    sessionName: session.name,
+    countedItems: session.countedItems,
+    by: `${req.user.name} (Restauró respaldo "${backup.name}")`
+  });
+
+  console.log(`[Backups] Respaldo "${backup.name}" restaurado en sesión ${cleanCode} por ${req.user.username}`);
+  res.json({
+    success: true,
+    message: `Respaldo "${backup.name}" restaurado con éxito`,
+    totalCounted: session.countedItems.length,
+    session
+  });
+});
+
+// Delete a backup snapshot from a specific session
+app.delete('/api/sessions/:code/backups/:backupId', requireAuth, (req, res) => {
+  const isCollab = req.user.isCollaborator || req.user.role === 'collaborator' || String(req.user.id).startsWith('collab_');
+  if (isCollab) {
+    return res.status(403).json({ error: 'Los auxiliares no tienen permiso para eliminar respaldos.' });
+  }
+
+  const { code, backupId } = req.params;
+  const cleanCode = String(code).trim().toUpperCase();
+  const session = sharedSessions[cleanCode];
+  if (!session) {
+    return res.status(404).json({ error: `La sesión "${cleanCode}" no existe.` });
+  }
+
+  if (!Array.isArray(session.backups)) session.backups = [];
+  session.backups = session.backups.filter((b) => b.id !== backupId);
+  persistSessionsToDisk();
+
+  console.log(`[Backups] Respaldo ${backupId} eliminado de sesión ${cleanCode} por ${req.user.username}`);
+  res.json({ success: true, message: 'Respaldo eliminado correctamente.' });
 });
 
 // Direct Collaborator Login with Session Code and Name
