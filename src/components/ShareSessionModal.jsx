@@ -12,7 +12,9 @@ import {
   Loader2, 
   QrCode, 
   AlertCircle,
-  Laptop
+  Laptop,
+  Share2,
+  Hash
 } from 'lucide-react';
 import { fetchNetworkInfo, migrateLocalDataToServer } from '../utils/socket';
 import { getAllProductsFromDB } from '../utils/db';
@@ -27,6 +29,7 @@ export default function ShareSessionModal({
   countedItems = [],
   historyLogs = [],
   catalogCount = 0,
+  activeSession = null,
   onSyncSuccess
 }) {
   const [activeTab, setActiveTab] = useState('cloud'); // 'cloud' | 'wifi' | 'sync'
@@ -76,6 +79,18 @@ export default function ShareSessionModal({
     if (!url) return;
     navigator.clipboard.writeText(url).then(() => {
       setCopiedType(type);
+      setTimeout(() => setCopiedType(null), 2500);
+    });
+  };
+
+  const handleCopyWhatsAppInvitation = () => {
+    const code = activeSession?.code || '';
+    const name = activeSession?.name || sessionName || 'Conteo de Inventario';
+    const link = publicWebUrl || currentOrigin;
+    const message = `📋 *INVENTARIOS APP - INVITACIÓN AL CONTEO*\n\nHola equipo, para unirse al conteo *"${name}"* en tiempo real:\n\n1. Entren a: ${link}\n2. En la pantalla de inicio, seleccionen *"Auxiliar con Código"*\n3. Ingresen el Código de Sesión: *${code}*\n4. Coloquen su Nombre y presionen *"Unirme al Conteo"*\n\n¡Listo para comenzar a contar! 🚀`;
+
+    navigator.clipboard.writeText(message).then(() => {
+      setCopiedType('whatsapp');
       setTimeout(() => setCopiedType(null), 2500);
     });
   };
@@ -176,7 +191,50 @@ export default function ShareSessionModal({
         </div>
 
         {/* Modal Body */}
-        <div className="p-6">
+        <div className="p-6 space-y-4">
+
+          {/* Session Code Card for Auxiliaries */}
+          {activeSession?.code && (
+            <div className="bg-gradient-to-r from-indigo-50 to-slate-50 border-2 border-indigo-200 rounded-2xl p-4 text-xs shadow-xs">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-indigo-600 flex items-center gap-1">
+                    <Hash className="w-3.5 h-3.5" />
+                    Código de Sesión para tus Auxiliares
+                  </span>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-2xl font-mono font-black text-indigo-700 tracking-wider">
+                      {activeSession.code}
+                    </span>
+                    <span className="text-xs text-slate-500 font-medium">
+                      • "{activeSession.name || sessionName}"
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(activeSession.code, 'sessionCode')}
+                    className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs shadow-xs transition-colors"
+                  >
+                    {copiedType === 'sessionCode' ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                    <span>{copiedType === 'sessionCode' ? '¡Código Copiado!' : 'Copiar Código'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleCopyWhatsAppInvitation}
+                    className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs shadow-xs transition-colors"
+                    title="Copiar invitación completa para enviar por WhatsApp"
+                  >
+                    {copiedType === 'whatsapp' ? <Check className="w-4 h-4" /> : <Share2 className="w-4 h-4" />}
+                    <span>{copiedType === 'whatsapp' ? '¡Invitación Copiada!' : 'Copiar para WhatsApp'}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* TAB 1: CLOUDFLARE PUBLIC TUNNEL OR RENDER HOSTED URL */}
           {activeTab === 'cloud' && (

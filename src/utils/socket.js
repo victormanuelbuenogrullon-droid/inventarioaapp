@@ -74,13 +74,125 @@ export async function migrateLocalDataToServer({ sessionName, countedItems, hist
   return await response.json();
 }
 
+// Session API Calls
+export async function createSessionApi({ name }) {
+  const baseUrl = getServerBaseUrl();
+  const token = localStorage.getItem('inventariosapp_token_v1');
+  const response = await fetch(`${baseUrl}/api/sessions/create`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    },
+    body: JSON.stringify({ name })
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || 'Error al crear la sesión');
+  }
+  return data.session;
+}
+
+export async function validateSessionApi(code) {
+  const baseUrl = getServerBaseUrl();
+  const clean = String(code || '').trim().toUpperCase();
+  const response = await fetch(`${baseUrl}/api/sessions/validate/${encodeURIComponent(clean)}`);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || 'Código de sesión inválido o expirado');
+  }
+  return data.session;
+}
+
+export async function fetchMySessionsApi() {
+  const baseUrl = getServerBaseUrl();
+  const token = localStorage.getItem('inventariosapp_token_v1');
+  const response = await fetch(`${baseUrl}/api/sessions/my`, {
+    headers: {
+      'Authorization': `Bearer ${token}`
+    }
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || 'Error al obtener tus sesiones');
+  }
+  return data;
+}
+
+export async function fetchSessionDetailsApi(code) {
+  const baseUrl = getServerBaseUrl();
+  const token = localStorage.getItem('inventariosapp_token_v1');
+  const clean = String(code || '').trim().toUpperCase();
+  const response = await fetch(`${baseUrl}/api/sessions/${encodeURIComponent(clean)}`, {
+    headers: {
+      'Authorization': `Bearer ${token}`
+    }
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || 'Error al obtener datos de la sesión');
+  }
+  return data.session;
+}
+
+export async function deleteSessionApi(code) {
+  const baseUrl = getServerBaseUrl();
+  const token = localStorage.getItem('inventariosapp_token_v1');
+  const clean = String(code || '').trim().toUpperCase();
+  const response = await fetch(`${baseUrl}/api/sessions/${encodeURIComponent(clean)}`, {
+    method: 'DELETE',
+    headers: {
+      'Authorization': `Bearer ${token}`
+    }
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || 'Error al eliminar sesión');
+  }
+  return data;
+}
+
+export async function collaboratorLoginApi({ sessionCode, name }) {
+  const baseUrl = getServerBaseUrl();
+  const response = await fetch(`${baseUrl}/api/auth/collaborator-login`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ sessionCode, name })
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || 'Error al acceder como auxiliar');
+  }
+  return data;
+}
+
+export function getActiveSessionCode() {
+  return localStorage.getItem('inventariosapp_active_session_code') || '';
+}
+
+export function setActiveSessionCode(code) {
+  if (code) {
+    localStorage.setItem('inventariosapp_active_session_code', String(code).trim().toUpperCase());
+  } else {
+    localStorage.removeItem('inventariosapp_active_session_code');
+  }
+}
+
 export function getSocket() {
   if (!socket) {
     const serverUrl = getServerBaseUrl();
     const token = localStorage.getItem('inventariosapp_token_v1');
-    
+    const sessionCode = getActiveSessionCode();
+
     socket = io(serverUrl, {
-      auth: { token },
+      auth: { token, sessionCode },
       transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionAttempts: Infinity,
@@ -91,6 +203,11 @@ export function getSocket() {
 
     socket.on('connect', () => {
       console.log('🟢 [Socket] Conectado en tiempo real al servidor:', socket.id);
+      const activeCode = getActiveSessionCode();
+      const userName = localStorage.getItem('inventariosapp_auditor_name');
+      if (activeCode) {
+        socket.emit('session:join', { sessionCode: activeCode, userName });
+      }
     });
 
     socket.on('disconnect', (reason) => {
@@ -112,40 +229,52 @@ export function resetSocket() {
   }
 }
 
-
-
-export function emitCountApply(product, qty, isSettingExact = false) {
+export function emitSessionJoin(sessionCode, userName) {
   const s = getSocket();
+  const cleanCode = String(sessionCode || '').trim().toUpperCase();
+  setActiveSessionCode(cleanCode);
   if (s && s.connected) {
-    s.emit('count:apply', { product, qty, isSettingExact });
+    s.emit('session:join', { sessionCode: cleanCode, userName });
   }
 }
 
-export function emitItemDelete(product) {
+export function emitCountApply(product, qty, isSettingExact = false, sessionCode = null) {
   const s = getSocket();
+  const activeCode = sessionCode || getActiveSessionCode();
   if (s && s.connected) {
-    s.emit('item:delete', product);
+    s.emit('count:apply', { product, qty, isSettingExact, sessionCode: activeCode });
   }
 }
 
-export function emitInventoryClear() {
+export function emitItemDelete(product, sessionCode = null) {
   const s = getSocket();
+  const activeCode = sessionCode || getActiveSessionCode();
   if (s && s.connected) {
-    s.emit('inventory:clear');
+    s.emit('item:delete', product, activeCode);
   }
 }
 
-export function emitSessionRename(newName) {
+export function emitInventoryClear(sessionCode = null) {
   const s = getSocket();
+  const activeCode = sessionCode || getActiveSessionCode();
   if (s && s.connected) {
-    s.emit('session:rename', newName);
+    s.emit('inventory:clear', activeCode);
   }
 }
 
-export function emitSessionRestore(items, name) {
+export function emitSessionRename(newName, sessionCode = null) {
   const s = getSocket();
+  const activeCode = sessionCode || getActiveSessionCode();
   if (s && s.connected) {
-    s.emit('session:restore', { items, name });
+    s.emit('session:rename', newName, activeCode);
+  }
+}
+
+export function emitSessionRestore(items, name, sessionCode = null) {
+  const s = getSocket();
+  const activeCode = sessionCode || getActiveSessionCode();
+  if (s && s.connected) {
+    s.emit('session:restore', { items, name, sessionCode: activeCode });
   }
 }
 
@@ -163,10 +292,11 @@ export function emitSetAuditorName(name) {
   }
 }
 
-export function emitHistoryClear() {
+export function emitHistoryClear(sessionCode = null) {
   const s = getSocket();
+  const activeCode = sessionCode || getActiveSessionCode();
   if (s && s.connected) {
-    s.emit('history:clear');
+    s.emit('history:clear', activeCode);
   }
 }
 

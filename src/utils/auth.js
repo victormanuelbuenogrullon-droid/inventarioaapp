@@ -46,14 +46,14 @@ export function clearAuthSession() {
   localStorage.removeItem(USER_KEY);
 }
 
-export async function loginUser(username, password) {
+export async function loginUser(username, password, sessionCode = null) {
   const baseUrl = getServerBaseUrl();
   const backupUsers = getStoredUsersBackup();
 
   const response = await fetch(`${baseUrl}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password, backupUsers })
+    body: JSON.stringify({ username, password, sessionCode, backupUsers })
   });
 
   const data = await response.json().catch(() => ({}));

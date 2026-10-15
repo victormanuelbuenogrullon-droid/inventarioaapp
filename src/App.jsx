@@ -19,6 +19,7 @@ import CameraScannerModal from './components/CameraScannerModal';
 import HistoryLogView from './components/HistoryLogView';
 import LoginView from './components/LoginView';
 import UserManagementModal from './components/UserManagementModal';
+import SessionSelectorModal from './components/SessionSelectorModal';
 import { getStoredToken, getStoredUser, fetchCurrentUser, clearAuthSession } from './utils/auth';
 import { getCatalogCount, saveProductsInBatches, saveSingleProduct, updateProductInDB, initMemoryCache, getAllProductsFromDB } from './utils/db';
 import { exportToExcel } from './utils/export';
@@ -32,6 +33,9 @@ import {
   emitCatalogProductUpdated, 
   emitSetAuditorName,
   emitHistoryClear,
+  emitSessionJoin,
+  getActiveSessionCode,
+  setActiveSessionCode,
   fetchCatalogFromServer,
   fetchCatalogMeta,
   fetchNetworkInfo,
@@ -55,6 +59,17 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState(() => getStoredUser());
   const [isAuthChecking, setIsAuthChecking] = useState(true);
   const [isUserManagementOpen, setIsUserManagementOpen] = useState(false);
+
+  // Active Multi-User Session State
+  const [activeSession, setActiveSession] = useState(() => {
+    try {
+      const raw = localStorage.getItem('inventariosapp_active_session_info');
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [isSessionSelectorOpen, setIsSessionSelectorOpen] = useState(false);
 
   // Multi-user Real-time Collaboration State
   const [isOnline, setIsOnline] = useState(false);
@@ -88,6 +103,29 @@ export default function App() {
       }
     })();
   }, []);
+
+  // When user is authenticated but has no active session, prompt to create or pick session
+  useEffect(() => {
+    if (!isAuthChecking && currentUser && !activeSession) {
+      setIsSessionSelectorOpen(true);
+    }
+  }, [isAuthChecking, currentUser, activeSession]);
+
+  // Keep active session in sync with storage & socket
+  useEffect(() => {
+    if (activeSession?.code) {
+      try {
+        localStorage.setItem('inventariosapp_active_session_info', JSON.stringify(activeSession));
+        setActiveSessionCode(activeSession.code);
+        if (activeSession.name) {
+          setSessionName(activeSession.name);
+        }
+        emitSessionJoin(activeSession.code, currentUserName);
+      } catch (e) {
+        console.warn('Error saving active session info:', e);
+      }
+    }
+  }, [activeSession, currentUserName]);
 
   // Main State
   const [catalogCount, setCatalogCount] = useState(0);
@@ -283,12 +321,18 @@ export default function App() {
 
     const handleSyncInit = async (data) => {
       setIsOnline(true);
+      if (data.sessionCode) {
+        setActiveSession((prev) => ({
+          code: data.sessionCode,
+          name: data.sessionName || prev?.name || '',
+          expiresAt: data.expiresAt !== undefined ? data.expiresAt : prev?.expiresAt,
+          creatorName: data.creatorName || prev?.creatorName,
+          isExpired: data.isExpired || false
+        }));
+      }
       if (data.sessionName) setSessionName(data.sessionName);
       if (Array.isArray(data.countedItems)) {
-        // If server has counted items, adopt server state as source of truth
-        if (data.countedItems.length > 0) {
-          setCountedItems(data.countedItems);
-        }
+        setCountedItems(data.countedItems);
       }
       if (Array.isArray(data.historyLogs)) {
         setHistoryLogs(data.historyLogs);
@@ -323,6 +367,17 @@ export default function App() {
         if (localCount === 0 || localCount < data.catalogCount) {
           syncCatalogFromServer(data.catalogCount);
         }
+      }
+    };
+
+    const handleSessionError = (data) => {
+      if (data?.error) {
+        setLastScannedMessage({
+          type: 'error',
+          text: `⚠️ ${data.error}`,
+          time: new Date().toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+        });
+        setIsSessionSelectorOpen(true);
       }
     };
 
@@ -393,12 +448,16 @@ export default function App() {
     const handleSessionRenamed = (data) => {
       if (data.sessionName) {
         setSessionName(data.sessionName);
+        setActiveSession((prev) => prev ? { ...prev, name: data.sessionName } : null);
       }
     };
 
     const handleSessionRestored = (data) => {
       if (data.countedItems) setCountedItems(data.countedItems);
-      if (data.sessionName) setSessionName(data.sessionName);
+      if (data.sessionName) {
+        setSessionName(data.sessionName);
+        setActiveSession((prev) => prev ? { ...prev, name: data.sessionName } : null);
+      }
       const timeStr = new Date().toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
       setLastScannedMessage({
         type: 'success',
@@ -435,6 +494,7 @@ export default function App() {
     socket.on('connect', handleConnect);
     socket.on('disconnect', handleDisconnect);
     socket.on('sync:init', handleSyncInit);
+    socket.on('session:error', handleSessionError);
     socket.on('users:update', handleUsersUpdate);
     socket.on('count:updated', handleCountUpdated);
     socket.on('item:deleted', handleItemDeleted);
@@ -454,6 +514,7 @@ export default function App() {
       socket.off('connect', handleConnect);
       socket.off('disconnect', handleDisconnect);
       socket.off('sync:init', handleSyncInit);
+      socket.off('session:error', handleSessionError);
       socket.off('users:update', handleUsersUpdate);
       socket.off('count:updated', handleCountUpdated);
       socket.off('item:deleted', handleItemDeleted);
@@ -475,6 +536,12 @@ export default function App() {
 
   // Add or update an item in the list
   const applyCountToItem = useCallback((product, qtyToAddOrSet, isSettingExact = false) => {
+    if (activeSession?.expiresAt && new Date(activeSession.expiresAt).getTime() < Date.now()) {
+      alert('Esta sesión de conteo ha culminado su período de vigencia. No se pueden registrar más conteos en esta sesión.');
+      setIsSessionSelectorOpen(true);
+      return;
+    }
+
     // 1. Emit real-time WebSocket event to server
     emitCountApply(product, qtyToAddOrSet, isSettingExact);
 
@@ -786,12 +853,18 @@ export default function App() {
     }
   };
 
-  const handleLoginSuccess = (user, token) => {
+  const handleLoginSuccess = (user, token, session) => {
     setCurrentUser(user);
     if (user.name) {
       setCurrentUserName(user.name);
       localStorage.setItem(LOCAL_STORAGE_USER_NAME, user.name);
       emitSetAuditorName(user.name);
+    }
+    if (session) {
+      setActiveSession(session);
+      setIsSessionSelectorOpen(false);
+    } else {
+      setIsSessionSelectorOpen(true);
     }
     resetSocket();
     getSocket();
@@ -803,7 +876,23 @@ export default function App() {
 
     clearAuthSession();
     setCurrentUser(null);
+    setActiveSession(null);
+    localStorage.removeItem('inventariosapp_active_session_info');
+    setActiveSessionCode('');
     resetSocket();
+  };
+
+  const handleSelectSession = (session) => {
+    if (!session) return;
+    setActiveSession(session);
+    if (session.name) setSessionName(session.name);
+    emitSessionJoin(session.code, currentUserName);
+    setIsSessionSelectorOpen(false);
+    setLastScannedMessage({
+      type: 'success',
+      text: `📂 Conectado a la sesión "${session.name}" (${session.code}).`,
+      time: new Date().toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    });
   };
 
   if (isAuthChecking) {
@@ -818,6 +907,8 @@ export default function App() {
   if (!currentUser) {
     return <LoginView onLoginSuccess={handleLoginSuccess} />;
   }
+
+  const isSessionExpired = activeSession?.expiresAt && new Date(activeSession.expiresAt).getTime() < Date.now();
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col">
@@ -844,9 +935,30 @@ export default function App() {
         onOpenShareModal={() => setIsShareModalOpen(true)}
         currentUserName={currentUserName}
         currentUser={currentUser}
+        activeSession={activeSession}
+        onOpenSessionSelector={() => setIsSessionSelectorOpen(true)}
         onOpenUserManagement={() => setIsUserManagementOpen(true)}
         onLogout={handleLogout}
       />
+
+      {/* Expired Session Alert Banner */}
+      {isSessionExpired && (
+        <div className="bg-rose-600 text-white px-4 py-2.5 text-xs flex items-center justify-between shadow-xs sticky top-14 z-30 animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <Clock className="w-4 h-4 text-rose-100 shrink-0 animate-pulse" />
+            <span>
+              <strong>Esta sesión de conteo ha culminado su período de vigencia</strong> (venció el {new Date(activeSession.expiresAt).toLocaleDateString('es-DO')}). Para continuar, crea o selecciona una sesión vigente.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsSessionSelectorOpen(true)}
+            className="px-2.5 py-1 bg-white text-rose-700 hover:bg-rose-50 font-bold rounded-lg text-xs shadow-xs transition-colors shrink-0 ml-2"
+          >
+            Cambiar Sesión
+          </button>
+        </div>
+      )}
 
       {/* Notice when user's access has 3 or fewer days remaining */}
       {currentUser?.expiresAt && (() => {
@@ -1031,6 +1143,7 @@ export default function App() {
         countedItems={countedItems}
         historyLogs={historyLogs}
         catalogCount={catalogCount}
+        activeSession={activeSession}
         onSyncSuccess={() => {
           setLocalDataMigrationAvailable(false);
           setLastScannedMessage({
@@ -1073,6 +1186,16 @@ export default function App() {
         onClose={() => setIsClearConfirmOpen(false)}
         onConfirmClear={handleClearCount}
         totalItems={countedItems.length}
+      />
+
+      {/* Multi-Session Selector / Room Picker Modal */}
+      <SessionSelectorModal
+        isOpen={isSessionSelectorOpen}
+        onClose={() => setIsSessionSelectorOpen(false)}
+        currentUser={currentUser}
+        activeSession={activeSession}
+        onSelectSession={handleSelectSession}
+        canClose={!!activeSession}
       />
 
       {/* Admin User Management Modal */}

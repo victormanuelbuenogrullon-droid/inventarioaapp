@@ -113,10 +113,14 @@ if (!fs.existsSync(DATA_DIR)) {
 }
 
 const STATE_FILE = path.join(DATA_DIR, 'inventory_state.json');
+const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
 const CATALOG_FILE = path.join(DATA_DIR, 'catalog.json');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 
-// Default initial state
+// Sessions store: Record<sessionCode, SessionObject>
+let sharedSessions = {};
+
+// Default initial single-session state (for backward-compatibility)
 let sharedState = {
   sessionName: 'Pase de Inventario General',
   countedItems: [],
@@ -126,8 +130,53 @@ let sharedState = {
 
 let sharedCatalog = [];
 
-// Load saved state from disk if exists
+// Helper to check if a session has expired based on its creator's expiration
+function isSessionExpired(session) {
+  if (!session || !session.expiresAt) return false;
+  return new Date(session.expiresAt).getTime() < Date.now();
+}
+
+// Generate unique readable session code (e.g. INV-8492)
+function generateSessionCode() {
+  const digits = '0123456789';
+  let code;
+  let attempts = 0;
+  do {
+    let rand = '';
+    for (let i = 0; i < 4; i++) {
+      rand += digits.charAt(Math.floor(Math.random() * digits.length));
+    }
+    code = `INV-${rand}`;
+    attempts++;
+  } while (sharedSessions[code] && attempts < 500);
+  return code;
+}
+
+// Debounced save for sessions
+let saveSessionsTimeout = null;
+function persistSessionsToDisk() {
+  clearTimeout(saveSessionsTimeout);
+  saveSessionsTimeout = setTimeout(() => {
+    try {
+      fs.writeFileSync(SESSIONS_FILE, JSON.stringify(sharedSessions, null, 2), 'utf-8');
+    } catch (e) {
+      console.error('[Storage] Error guardando sesiones en disco:', e);
+    }
+  }, 300);
+}
+
+// Load saved state and sessions from disk if exist
 try {
+  if (fs.existsSync(SESSIONS_FILE)) {
+    const rawSessions = fs.readFileSync(SESSIONS_FILE, 'utf-8');
+    const parsedSessions = JSON.parse(rawSessions);
+    if (parsedSessions && typeof parsedSessions === 'object') {
+      sharedSessions = parsedSessions;
+      console.log(`[Storage] ${Object.keys(sharedSessions).length} sesiones de inventario cargadas desde disco.`);
+    }
+  }
+
+  // Load legacy single-state file if exists
   if (fs.existsSync(STATE_FILE)) {
     const raw = fs.readFileSync(STATE_FILE, 'utf-8');
     const parsed = JSON.parse(raw);
@@ -136,13 +185,30 @@ try {
       sharedState.countedItems = parsed.countedItems || [];
       sharedState.historyLogs = Array.isArray(parsed.historyLogs) ? parsed.historyLogs : [];
       sharedState.lastUpdated = parsed.lastUpdated || new Date().toISOString();
-      console.log(`[Storage] Estado cargado desde disco: ${sharedState.countedItems.length} productos contados, ${sharedState.historyLogs.length} registros en historial.`);
     }
   }
-} catch (err) {
-  console.error('[Storage] Error al leer archivo de estado:', err);
-}
 
+  // If no sessions exist yet, migrate from legacy state or initialize default
+  if (Object.keys(sharedSessions).length === 0) {
+    const defaultCode = 'INV-1001';
+    sharedSessions[defaultCode] = {
+      code: defaultCode,
+      name: sharedState.sessionName || 'Pase de Inventario General',
+      createdBy: 'u_admin',
+      creatorUsername: 'admin',
+      creatorName: 'Administrador',
+      createdAt: new Date().toISOString(),
+      expiresAt: null,
+      countedItems: sharedState.countedItems || [],
+      historyLogs: sharedState.historyLogs || [],
+      lastUpdated: sharedState.lastUpdated || new Date().toISOString()
+    };
+    persistSessionsToDisk();
+    console.log(`[Storage] Sesión inicial creada con código: ${defaultCode}`);
+  }
+} catch (err) {
+  console.error('[Storage] Error al inicializar sesiones desde disco:', err);
+}
 
 // Load saved catalog from disk if exists
 try {
@@ -207,6 +273,7 @@ function generateToken(user) {
     username: user.username,
     name: user.name,
     role: user.role,
+    sessionCode: user.sessionCode || null,
     exp: Date.now() + 1000 * 60 * 60 * 24 * 30 // 30 days
   })).toString('base64');
   const sig = crypto.createHmac('sha256', AUTH_SECRET).update(payload).digest('hex');
@@ -301,9 +368,25 @@ function requireAuth(req, res, next) {
   if (!tokenData) {
     return res.status(401).json({ error: 'Sesión expirada o inválida. Inicia sesión de nuevo.' });
   }
-  const user = sharedUsers.find((u) => u.id === tokenData.userId);
+  let user = sharedUsers.find((u) => u.id === tokenData.userId);
   if (!user) {
-    return res.status(401).json({ error: 'El usuario ya no existe o fue eliminado.' });
+    // Check if virtual collaborator token
+    if (tokenData.userId && String(tokenData.userId).startsWith('collab_')) {
+      const targetSession = tokenData.sessionCode ? sharedSessions[tokenData.sessionCode] : null;
+      if (!targetSession || isSessionExpired(targetSession)) {
+        return res.status(403).json({ error: 'La sesión a la que intentas acceder ha culminado su vigencia.' });
+      }
+      user = {
+        id: tokenData.userId,
+        username: tokenData.username,
+        name: tokenData.name,
+        role: 'auditor',
+        sessionCode: tokenData.sessionCode,
+        expiresAt: targetSession.expiresAt
+      };
+    } else {
+      return res.status(401).json({ error: 'El usuario ya no existe o fue eliminado.' });
+    }
   }
   if (isUserExpired(user)) {
     return res.status(403).json({ error: 'Tu período de acceso a la aplicación ha culminado. Comunícate con el Administrador.' });
@@ -321,11 +404,22 @@ function requireAdmin(req, res, next) {
   });
 }
 
-// Connected clients tracking
+// Connected clients tracking: socket.id -> { id, name, sessionCode, joinedAt }
 const connectedAuditors = new Map();
 
 function getAuditorsList() {
   return Array.from(connectedAuditors.values());
+}
+
+function getAuditorsForSession(sessionCode) {
+  const list = [];
+  if (!sessionCode) return list;
+  for (const [, auditor] of connectedAuditors.entries()) {
+    if (auditor.sessionCode === sessionCode) {
+      list.push({ id: auditor.id, name: auditor.name, joinedAt: auditor.joinedAt });
+    }
+  }
+  return list;
 }
 
 function getItemKey(p) {
@@ -338,7 +432,7 @@ function getItemKey(p) {
 
 // Login
 app.post('/api/auth/login', (req, res) => {
-  const { username, password, backupUsers } = req.body || {};
+  const { username, password, sessionCode, backupUsers } = req.body || {};
   if (!username || !password) {
     return res.status(400).json({ error: 'Ingresa tu usuario y contraseña' });
   }
@@ -376,6 +470,27 @@ app.post('/api/auth/login', (req, res) => {
     });
   }
 
+  // Optional session validation if sessionCode was provided
+  let activeSession = null;
+  if (sessionCode) {
+    const cleanCode = String(sessionCode).trim().toUpperCase();
+    const targetSession = sharedSessions[cleanCode];
+    if (!targetSession) {
+      return res.status(404).json({ error: `El código de sesión "${cleanCode}" no existe.` });
+    }
+    if (isSessionExpired(targetSession)) {
+      const expDateStr = new Date(targetSession.expiresAt).toLocaleDateString('es-DO');
+      return res.status(403).json({ error: `La sesión "${cleanCode}" ha culminado su período de vigencia (venció el ${expDateStr}).` });
+    }
+    activeSession = {
+      code: targetSession.code,
+      name: targetSession.name,
+      creatorName: targetSession.creatorName,
+      expiresAt: targetSession.expiresAt,
+      isExpired: false
+    };
+  }
+
   const token = generateToken(user);
   res.json({
     success: true,
@@ -388,6 +503,7 @@ app.post('/api/auth/login', (req, res) => {
       accessDays: user.accessDays || null,
       expiresAt: user.expiresAt || null
     },
+    activeSession,
     usersBackup: user.role === 'admin' ? sharedUsers : undefined
   });
 });
@@ -509,7 +625,16 @@ app.put('/api/users/:id/access', requireAdmin, (req, res) => {
   }
 
   persistUsersToDisk();
-  console.log(`[Auth] Vigencia de ${target.username} actualizada a: ${target.accessDays ? target.accessDays + ' días' : 'Permanente'}`);
+
+  // Synchronize expiration for all sessions created by this user
+  Object.values(sharedSessions).forEach(sess => {
+    if (sess.createdBy === target.id) {
+      sess.expiresAt = target.expiresAt;
+    }
+  });
+  persistSessionsToDisk();
+
+  console.log(`[Auth] Vigencia de ${target.username} y sus sesiones actualizada a: ${target.accessDays ? target.accessDays + ' días' : 'Permanente'}`);
 
   res.json({
     success: true,
@@ -602,6 +727,166 @@ app.post('/api/users/restore', requireAdmin, (req, res) => {
 });
 
 // ==========================================
+// REST API ENDPOINTS FOR SESSIONS / ROOMS
+// ==========================================
+
+// Create new counting session
+app.post('/api/sessions/create', requireAuth, (req, res) => {
+  const { name } = req.body || {};
+  const cleanName = (name && String(name).trim()) || `Inventario de ${req.user.name}`;
+  const code = generateSessionCode();
+
+  const newSession = {
+    code,
+    name: cleanName,
+    createdBy: req.user.id,
+    creatorUsername: req.user.username,
+    creatorName: req.user.name,
+    createdAt: new Date().toISOString(),
+    expiresAt: req.user.expiresAt || null, // Inherits creator's expiration!
+    countedItems: [],
+    historyLogs: [],
+    lastUpdated: new Date().toISOString()
+  };
+
+  sharedSessions[code] = newSession;
+  persistSessionsToDisk();
+
+  console.log(`[Sessions] Nueva sesión creada: ${code} ("${cleanName}") por ${req.user.username} (Vigencia: ${newSession.expiresAt || 'Permanente'})`);
+  res.json({ success: true, session: newSession });
+});
+
+// Validate session code
+app.get('/api/sessions/validate/:code', (req, res) => {
+  const { code } = req.params;
+  const cleanCode = String(code).trim().toUpperCase();
+  const session = sharedSessions[cleanCode];
+  if (!session) {
+    return res.status(404).json({ error: `El código de sesión "${cleanCode}" no existe.` });
+  }
+  const expired = isSessionExpired(session);
+  if (expired) {
+    const expDateStr = new Date(session.expiresAt).toLocaleDateString('es-DO');
+    return res.status(403).json({
+      error: `La sesión "${cleanCode}" ha culminado su período de vigencia (venció el ${expDateStr}).`,
+      isExpired: true
+    });
+  }
+  res.json({
+    success: true,
+    session: {
+      code: session.code,
+      name: session.name,
+      creatorName: session.creatorName,
+      createdAt: session.createdAt,
+      expiresAt: session.expiresAt,
+      totalCounted: session.countedItems.length,
+      isExpired: false
+    }
+  });
+});
+
+// Get all sessions created by current user (or all if admin)
+app.get('/api/sessions/my', requireAuth, (req, res) => {
+  let list = Object.values(sharedSessions);
+  if (req.user.role !== 'admin') {
+    list = list.filter((s) => s.createdBy === req.user.id);
+  }
+  const safeList = list.map((s) => ({
+    code: s.code,
+    name: s.name,
+    createdBy: s.createdBy,
+    creatorName: s.creatorName,
+    createdAt: s.createdAt,
+    expiresAt: s.expiresAt,
+    isExpired: isSessionExpired(s),
+    totalCounted: s.countedItems.length,
+    totalLogs: (s.historyLogs || []).length,
+    lastUpdated: s.lastUpdated
+  })).sort((a, b) => new Date(b.lastUpdated || b.createdAt) - new Date(a.lastUpdated || a.createdAt));
+
+  res.json(safeList);
+});
+
+// Get session details
+app.get('/api/sessions/:code', requireAuth, (req, res) => {
+  const { code } = req.params;
+  const cleanCode = String(code).trim().toUpperCase();
+  const session = sharedSessions[cleanCode];
+  if (!session) {
+    return res.status(404).json({ error: `La sesión "${cleanCode}" no fue encontrada.` });
+  }
+  if (isSessionExpired(session)) {
+    return res.status(403).json({ error: 'Esta sesión ha culminado su período de vigencia.' });
+  }
+  res.json({
+    success: true,
+    session
+  });
+});
+
+// Delete session (Creator or Admin only)
+app.delete('/api/sessions/:code', requireAuth, (req, res) => {
+  const { code } = req.params;
+  const cleanCode = String(code).trim().toUpperCase();
+  const session = sharedSessions[cleanCode];
+  if (!session) {
+    return res.status(404).json({ error: `La sesión "${cleanCode}" no existe.` });
+  }
+  if (req.user.role !== 'admin' && session.createdBy !== req.user.id) {
+    return res.status(403).json({ error: 'Solo el creador o un administrador puede eliminar esta sesión.' });
+  }
+
+  delete sharedSessions[cleanCode];
+  persistSessionsToDisk();
+  console.log(`[Sessions] Sesión ${cleanCode} eliminada por ${req.user.username}`);
+  res.json({ success: true, message: `Sesión ${cleanCode} eliminada correctamente.` });
+});
+
+// Direct Collaborator Login with Session Code and Name
+app.post('/api/auth/collaborator-login', (req, res) => {
+  const { sessionCode, name } = req.body || {};
+  if (!sessionCode || !name) {
+    return res.status(400).json({ error: 'Por favor ingresa el Código de Sesión y tu Nombre.' });
+  }
+  const cleanCode = String(sessionCode).trim().toUpperCase();
+  const session = sharedSessions[cleanCode];
+  if (!session) {
+    return res.status(404).json({ error: `El código de sesión "${cleanCode}" no existe.` });
+  }
+  if (isSessionExpired(session)) {
+    const expDateStr = new Date(session.expiresAt).toLocaleDateString('es-DO');
+    return res.status(403).json({
+      error: `Esta sesión ha culminado su período de vigencia (venció el ${expDateStr}). Comunícate con el líder del conteo.`
+    });
+  }
+
+  const cleanName = String(name).trim();
+  const collabUser = {
+    id: `collab_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    username: cleanName.toLowerCase().replace(/\s+/g, '_'),
+    name: `${cleanName} (Auxiliar)`,
+    role: 'auditor',
+    sessionCode: cleanCode,
+    expiresAt: session.expiresAt
+  };
+
+  const token = generateToken(collabUser);
+  res.json({
+    success: true,
+    token,
+    user: collabUser,
+    activeSession: {
+      code: session.code,
+      name: session.name,
+      creatorName: session.creatorName,
+      expiresAt: session.expiresAt,
+      isExpired: false
+    }
+  });
+});
+
+// ==========================================
 // REST API ENDPOINTS FOR CATALOG & HEALTH
 // ==========================================
 
@@ -644,12 +929,11 @@ app.get('/api/history', (req, res) => {
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
+  const sessionList = Object.values(sharedSessions);
   res.json({
     status: 'ok',
-    sessionName: sharedState.sessionName,
-    totalCounted: sharedState.countedItems.length,
+    totalSessions: sessionList.length,
     catalogCount: sharedCatalog.length,
-    totalLogs: (sharedState.historyLogs || []).length,
     onlineUsers: connectedAuditors.size
   });
 });
@@ -664,21 +948,18 @@ app.get('/api/network-info', (req, res) => {
     wifiUrl: `http://${localIp}:${PORT}`,
     tunnelUrl: sharedTunnelUrl,
     hasTunnel: !!sharedTunnelUrl,
-    totalCounted: sharedState.countedItems.length,
-    catalogCount: sharedCatalog.length,
-    sessionName: sharedState.sessionName
+    totalSessions: Object.keys(sharedSessions).length,
+    catalogCount: sharedCatalog.length
   });
 });
 
 // Migrate local browser state to server shared database
 app.post('/api/migrate-from-client', (req, res) => {
-  const { sessionName, countedItems, historyLogs, catalog } = req.body;
-  let updatedAny = false;
+  const { sessionCode, sessionName, countedItems, historyLogs, catalog } = req.body;
 
   if (Array.isArray(catalog) && catalog.length > 0) {
     sharedCatalog = catalog;
     persistCatalogToDisk();
-    updatedAny = true;
     io.emit('catalog:updated', {
       totalProducts: sharedCatalog.length,
       updatedAt: new Date().toISOString()
@@ -686,35 +967,58 @@ app.post('/api/migrate-from-client', (req, res) => {
     console.log(`[Migrate] Catálogo subido desde navegador local: ${catalog.length} productos.`);
   }
 
+  const targetCode = sessionCode ? String(sessionCode).trim().toUpperCase() : Object.keys(sharedSessions)[0] || 'INV-1001';
+  let targetSession = sharedSessions[targetCode];
+
+  if (!targetSession) {
+    targetSession = {
+      code: targetCode,
+      name: sessionName || 'Pase de Inventario Migrado',
+      createdBy: 'u_admin',
+      creatorUsername: 'admin',
+      creatorName: 'Administrador',
+      createdAt: new Date().toISOString(),
+      expiresAt: null,
+      countedItems: [],
+      historyLogs: [],
+      lastUpdated: new Date().toISOString()
+    };
+    sharedSessions[targetCode] = targetSession;
+  }
+
   if (Array.isArray(countedItems) && countedItems.length > 0) {
-    sharedState.countedItems = countedItems;
-    if (sessionName) sharedState.sessionName = sessionName;
+    targetSession.countedItems = countedItems;
+    if (sessionName) targetSession.name = sessionName;
     if (Array.isArray(historyLogs) && historyLogs.length > 0) {
-      sharedState.historyLogs = historyLogs;
+      targetSession.historyLogs = historyLogs;
     }
-    persistStateToDisk();
-    updatedAny = true;
-    io.emit('session:restored', {
-      sessionName: sharedState.sessionName,
-      countedItems: sharedState.countedItems,
+    targetSession.lastUpdated = new Date().toISOString();
+    persistSessionsToDisk();
+
+    io.to(targetCode).emit('session:restored', {
+      sessionCode: targetCode,
+      sessionName: targetSession.name,
+      countedItems: targetSession.countedItems,
       by: 'Migración desde navegador local'
     });
-    console.log(`[Migrate] Inventario subido desde navegador local: ${countedItems.length} productos contados.`);
+    console.log(`[Migrate] Inventario subido a sesión ${targetCode}: ${countedItems.length} productos contados.`);
   }
 
   res.json({
     success: true,
-    totalCounted: sharedState.countedItems.length,
+    sessionCode: targetCode,
+    totalCounted: targetSession.countedItems.length,
     catalogCount: sharedCatalog.length
   });
 });
 
 // ==========================================
-// REAL-TIME WEBSOCKETS LOGIC
+// REAL-TIME WEBSOCKETS LOGIC (ROOM-BASED)
 // ==========================================
 
 io.on('connection', (socket) => {
   let defaultName = `Auditor #${socket.id.slice(-4)}`;
+  let defaultSession = null;
 
   // Extract user identity from handshake auth token if available
   const clientToken = socket.handshake.auth?.token || socket.handshake.query?.token;
@@ -723,71 +1027,171 @@ io.on('connection', (socket) => {
     if (verified && verified.name) {
       defaultName = verified.name;
     }
+    if (verified && verified.sessionCode) {
+      defaultSession = verified.sessionCode;
+    }
   }
+
+  const handshakeSession = socket.handshake.auth?.sessionCode || socket.handshake.query?.sessionCode || defaultSession;
+  const initialSession = handshakeSession && sharedSessions[handshakeSession] ? handshakeSession : null;
+
+  socket.data.name = defaultName;
+  socket.data.sessionCode = initialSession;
 
   connectedAuditors.set(socket.id, {
     id: socket.id,
     name: defaultName,
+    sessionCode: initialSession,
     joinedAt: new Date().toISOString()
   });
 
-  console.log(`[Socket] Conectado: ${socket.id} (${connectedAuditors.size} usuarios en línea)`);
-
   const localIp = getLocalIpAddress();
 
-  // 1. Send initial shared state AND history logs to the newly connected user
-  socket.emit('sync:init', {
-    sessionName: sharedState.sessionName,
-    countedItems: sharedState.countedItems,
-    historyLogs: sharedState.historyLogs || [],
-    catalogCount: sharedCatalog.length,
-    auditors: getAuditorsList(),
-    totalUsers: connectedAuditors.size,
-    tunnelUrl: sharedTunnelUrl,
-    wifiUrl: `http://${localIp}:${PORT}`,
-    localUrl: `http://localhost:${PORT}`
-  });
+  if (initialSession) {
+    socket.join(initialSession);
+    const session = sharedSessions[initialSession];
+    const sessionAuditors = getAuditorsForSession(initialSession);
 
-  // 2. Broadcast updated user count to all users
-  io.emit('users:update', {
-    totalUsers: connectedAuditors.size,
-    auditors: getAuditorsList()
+    socket.emit('sync:init', {
+      sessionCode: session.code,
+      sessionName: session.name,
+      countedItems: session.countedItems,
+      historyLogs: session.historyLogs || [],
+      catalogCount: sharedCatalog.length,
+      expiresAt: session.expiresAt,
+      creatorName: session.creatorName,
+      isExpired: isSessionExpired(session),
+      auditors: sessionAuditors,
+      totalUsers: sessionAuditors.length,
+      tunnelUrl: sharedTunnelUrl,
+      wifiUrl: `http://${localIp}:${PORT}`,
+      localUrl: `http://localhost:${PORT}`
+    });
+
+    io.to(initialSession).emit('users:update', {
+      sessionCode: initialSession,
+      totalUsers: sessionAuditors.length,
+      auditors: sessionAuditors
+    });
+  }
+
+  console.log(`[Socket] Conectado: ${socket.id} (${defaultName}) | Sesión: ${initialSession || 'Sin sesión'}`);
+
+  // User joins or switches session room
+  socket.on('session:join', ({ sessionCode, userName }) => {
+    if (!sessionCode) return;
+    const cleanCode = String(sessionCode).trim().toUpperCase();
+    const session = sharedSessions[cleanCode];
+    if (!session) {
+      return socket.emit('session:error', { error: `La sesión "${cleanCode}" no existe.` });
+    }
+
+    if (isSessionExpired(session)) {
+      const expDateStr = new Date(session.expiresAt).toLocaleDateString('es-DO');
+      return socket.emit('session:error', {
+        error: `La sesión "${cleanCode}" ha culminado su período de vigencia (venció el ${expDateStr}).`,
+        isExpired: true
+      });
+    }
+
+    const prevSession = socket.data.sessionCode;
+    if (prevSession && prevSession !== cleanCode) {
+      socket.leave(prevSession);
+      const prevAuditors = getAuditorsForSession(prevSession).filter(a => a.id !== socket.id);
+      io.to(prevSession).emit('users:update', {
+        sessionCode: prevSession,
+        totalUsers: prevAuditors.length,
+        auditors: prevAuditors
+      });
+    }
+
+    const currentName = userName && userName.trim() ? userName.trim() : (socket.data.name || defaultName);
+    socket.data.sessionCode = cleanCode;
+    socket.data.name = currentName;
+    socket.join(cleanCode);
+
+    connectedAuditors.set(socket.id, {
+      id: socket.id,
+      name: currentName,
+      sessionCode: cleanCode,
+      joinedAt: new Date().toISOString()
+    });
+
+    const sessionAuditors = getAuditorsForSession(cleanCode);
+
+    socket.emit('sync:init', {
+      sessionCode: session.code,
+      sessionName: session.name,
+      countedItems: session.countedItems,
+      historyLogs: session.historyLogs || [],
+      catalogCount: sharedCatalog.length,
+      expiresAt: session.expiresAt,
+      creatorName: session.creatorName,
+      isExpired: isSessionExpired(session),
+      auditors: sessionAuditors,
+      totalUsers: sessionAuditors.length,
+      tunnelUrl: sharedTunnelUrl,
+      wifiUrl: `http://${localIp}:${PORT}`,
+      localUrl: `http://localhost:${PORT}`
+    });
+
+    io.to(cleanCode).emit('users:update', {
+      sessionCode: cleanCode,
+      totalUsers: sessionAuditors.length,
+      auditors: sessionAuditors
+    });
+
+    console.log(`[Socket] ${socket.id} (${currentName}) se unió a la sesión ${cleanCode}`);
   });
 
   // User sets their custom name
   socket.on('user:setName', (userName) => {
     if (userName && userName.trim()) {
       const cleanName = userName.trim();
+      socket.data.name = cleanName;
       const info = connectedAuditors.get(socket.id) || {};
       connectedAuditors.set(socket.id, { ...info, name: cleanName });
-      io.emit('users:update', {
-        totalUsers: connectedAuditors.size,
-        auditors: getAuditorsList()
-      });
+
+      if (socket.data.sessionCode) {
+        const list = getAuditorsForSession(socket.data.sessionCode);
+        io.to(socket.data.sessionCode).emit('users:update', {
+          sessionCode: socket.data.sessionCode,
+          totalUsers: list.length,
+          auditors: list
+        });
+      }
     }
   });
 
-  // 3. Apply a count (item added, scanned, or quantity modified)
-  socket.on('count:apply', ({ product, qty, isSettingExact }) => {
+  // Apply a count (item added, scanned, or quantity modified)
+  socket.on('count:apply', ({ product, qty, isSettingExact, sessionCode }) => {
     if (!product) return;
-    const auditorName = connectedAuditors.get(socket.id)?.name || 'Un usuario';
+    const targetCode = sessionCode ? String(sessionCode).trim().toUpperCase() : socket.data.sessionCode;
+    if (!targetCode) return;
+    const session = sharedSessions[targetCode];
+    if (!session) return;
+
+    if (isSessionExpired(session)) {
+      return socket.emit('session:error', { error: 'Esta sesión ha expirado y no admite modificaciones.' });
+    }
+
+    const auditorName = socket.data.name || connectedAuditors.get(socket.id)?.name || 'Un usuario';
     const key = getItemKey(product);
     const now = Date.now();
 
-    const existingIndex = sharedState.countedItems.findIndex((it) => getItemKey(it) === key);
+    const existingIndex = session.countedItems.findIndex((it) => getItemKey(it) === key);
     let finalQty = qty;
     let actionType = 'new';
 
     if (existingIndex >= 0) {
-      const existing = sharedState.countedItems[existingIndex];
+      const existing = session.countedItems[existingIndex];
       const newQty = isSettingExact ? qty : (Number(existing.cantidadContada) || 0) + qty;
       finalQty = newQty;
       actionType = isSettingExact ? 'set' : 'add';
 
       if (newQty <= 0) {
-        sharedState.countedItems.splice(existingIndex, 1);
-        
-        // Log deletion
+        session.countedItems.splice(existingIndex, 1);
+
         const deleteLog = {
           id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
           stationName: auditorName,
@@ -803,11 +1207,19 @@ io.on('connection', (socket) => {
           precio: Number(product.precio) || 0,
           timestamp: new Date().toISOString()
         };
-        if (!Array.isArray(sharedState.historyLogs)) sharedState.historyLogs = [];
-        sharedState.historyLogs.unshift(deleteLog);
+        if (!Array.isArray(session.historyLogs)) session.historyLogs = [];
+        session.historyLogs.unshift(deleteLog);
 
-        persistStateToDisk();
-        io.emit('item:deleted', { key, by: auditorName, log: deleteLog, historyLogs: sharedState.historyLogs });
+        session.lastUpdated = new Date().toISOString();
+        persistSessionsToDisk();
+
+        io.to(targetCode).emit('item:deleted', {
+          sessionCode: targetCode,
+          key,
+          by: auditorName,
+          log: deleteLog,
+          historyLogs: session.historyLogs
+        });
         return;
       } else {
         const updatedItem = {
@@ -822,10 +1234,9 @@ io.on('connection', (socket) => {
           lastUpdatedBy: auditorName
         };
 
-        sharedState.countedItems.splice(existingIndex, 1);
-        sharedState.countedItems.unshift(updatedItem);
+        session.countedItems.splice(existingIndex, 1);
+        session.countedItems.unshift(updatedItem);
 
-        // Record history log
         const logEntry = {
           id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
           stationName: auditorName,
@@ -842,22 +1253,23 @@ io.on('connection', (socket) => {
           timestamp: new Date().toISOString()
         };
 
-        if (!Array.isArray(sharedState.historyLogs)) sharedState.historyLogs = [];
-        sharedState.historyLogs.unshift(logEntry);
-        if (sharedState.historyLogs.length > 5000) {
-          sharedState.historyLogs = sharedState.historyLogs.slice(0, 5000);
+        if (!Array.isArray(session.historyLogs)) session.historyLogs = [];
+        session.historyLogs.unshift(logEntry);
+        if (session.historyLogs.length > 5000) {
+          session.historyLogs = session.historyLogs.slice(0, 5000);
         }
 
-        persistStateToDisk();
+        session.lastUpdated = new Date().toISOString();
+        persistSessionsToDisk();
 
-        // Broadcast update to ALL connected clients
-        io.emit('count:updated', {
+        io.to(targetCode).emit('count:updated', {
+          sessionCode: targetCode,
           item: updatedItem,
-          allCountedItems: sharedState.countedItems,
+          allCountedItems: session.countedItems,
           action: actionType,
           qtyChange: qty,
           log: logEntry,
-          historyLogs: sharedState.historyLogs,
+          historyLogs: session.historyLogs,
           by: auditorName
         });
       }
@@ -879,9 +1291,8 @@ io.on('connection', (socket) => {
           lastUpdatedBy: auditorName
         };
 
-        sharedState.countedItems.unshift(newItem);
+        session.countedItems.unshift(newItem);
 
-        // Record history log
         const logEntry = {
           id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
           stationName: auditorName,
@@ -898,33 +1309,40 @@ io.on('connection', (socket) => {
           timestamp: new Date().toISOString()
         };
 
-        if (!Array.isArray(sharedState.historyLogs)) sharedState.historyLogs = [];
-        sharedState.historyLogs.unshift(logEntry);
-        if (sharedState.historyLogs.length > 5000) {
-          sharedState.historyLogs = sharedState.historyLogs.slice(0, 5000);
+        if (!Array.isArray(session.historyLogs)) session.historyLogs = [];
+        session.historyLogs.unshift(logEntry);
+        if (session.historyLogs.length > 5000) {
+          session.historyLogs = session.historyLogs.slice(0, 5000);
         }
 
-        persistStateToDisk();
+        session.lastUpdated = new Date().toISOString();
+        persistSessionsToDisk();
 
-        io.emit('count:updated', {
+        io.to(targetCode).emit('count:updated', {
+          sessionCode: targetCode,
           item: newItem,
-          allCountedItems: sharedState.countedItems,
+          allCountedItems: session.countedItems,
           action: 'new',
           qtyChange: qty,
           log: logEntry,
-          historyLogs: sharedState.historyLogs,
+          historyLogs: session.historyLogs,
           by: auditorName
         });
       }
     }
   });
 
-  // 4. Delete item
-  socket.on('item:delete', (product) => {
+  // Delete item from session
+  socket.on('item:delete', (product, sessionCode) => {
+    const targetCode = sessionCode ? String(sessionCode).trim().toUpperCase() : socket.data.sessionCode;
+    if (!targetCode) return;
+    const session = sharedSessions[targetCode];
+    if (!session) return;
+
     const key = getItemKey(product);
-    const auditorName = connectedAuditors.get(socket.id)?.name || 'Un usuario';
-    sharedState.countedItems = sharedState.countedItems.filter((it) => getItemKey(it) !== key);
-    
+    const auditorName = socket.data.name || connectedAuditors.get(socket.id)?.name || 'Un usuario';
+    session.countedItems = session.countedItems.filter((it) => getItemKey(it) !== key);
+
     const deleteLog = {
       id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       stationName: auditorName,
@@ -940,56 +1358,85 @@ io.on('connection', (socket) => {
       precio: Number(product.precio) || 0,
       timestamp: new Date().toISOString()
     };
-    if (!Array.isArray(sharedState.historyLogs)) sharedState.historyLogs = [];
-    sharedState.historyLogs.unshift(deleteLog);
+    if (!Array.isArray(session.historyLogs)) session.historyLogs = [];
+    session.historyLogs.unshift(deleteLog);
 
-    persistStateToDisk();
-    io.emit('item:deleted', { key, allCountedItems: sharedState.countedItems, log: deleteLog, historyLogs: sharedState.historyLogs, by: auditorName });
-  });
+    session.lastUpdated = new Date().toISOString();
+    persistSessionsToDisk();
 
-  // 5. Clear count
-  socket.on('inventory:clear', () => {
-    const auditorName = connectedAuditors.get(socket.id)?.name || 'Un usuario';
-    sharedState.countedItems = [];
-    persistStateToDisk();
-    io.emit('inventory:cleared', { by: auditorName });
-  });
-
-  // Clear history logs
-  socket.on('history:clear', () => {
-    const auditorName = connectedAuditors.get(socket.id)?.name || 'Un usuario';
-    sharedState.historyLogs = [];
-    persistStateToDisk();
-    io.emit('history:cleared', { by: auditorName });
-  });
-
-
-  // 6. Rename session
-  socket.on('session:rename', (newName) => {
-    if (!newName) return;
-    const auditorName = connectedAuditors.get(socket.id)?.name || 'Un usuario';
-    sharedState.sessionName = newName.trim();
-    persistStateToDisk();
-    io.emit('session:renamed', { sessionName: sharedState.sessionName, by: auditorName });
-  });
-
-  // 7. Restore entire session snapshot
-  socket.on('session:restore', ({ items, name }) => {
-    const auditorName = connectedAuditors.get(socket.id)?.name || 'Un usuario';
-    sharedState.countedItems = Array.isArray(items) ? items : [];
-    if (name) sharedState.sessionName = name;
-    persistStateToDisk();
-    io.emit('session:restored', {
-      sessionName: sharedState.sessionName,
-      countedItems: sharedState.countedItems,
+    io.to(targetCode).emit('item:deleted', {
+      sessionCode: targetCode,
+      key,
+      allCountedItems: session.countedItems,
+      log: deleteLog,
+      historyLogs: session.historyLogs,
       by: auditorName
     });
   });
 
-  // 8. Catalog product update broadcast
+  // Clear session count
+  socket.on('inventory:clear', (sessionCode) => {
+    const targetCode = sessionCode ? String(sessionCode).trim().toUpperCase() : socket.data.sessionCode;
+    if (!targetCode || !sharedSessions[targetCode]) return;
+    const session = sharedSessions[targetCode];
+    const auditorName = socket.data.name || connectedAuditors.get(socket.id)?.name || 'Un usuario';
+    session.countedItems = [];
+    session.lastUpdated = new Date().toISOString();
+    persistSessionsToDisk();
+    io.to(targetCode).emit('inventory:cleared', { sessionCode: targetCode, by: auditorName });
+  });
+
+  // Clear session history logs
+  socket.on('history:clear', (sessionCode) => {
+    const targetCode = sessionCode ? String(sessionCode).trim().toUpperCase() : socket.data.sessionCode;
+    if (!targetCode || !sharedSessions[targetCode]) return;
+    const session = sharedSessions[targetCode];
+    const auditorName = socket.data.name || connectedAuditors.get(socket.id)?.name || 'Un usuario';
+    session.historyLogs = [];
+    session.lastUpdated = new Date().toISOString();
+    persistSessionsToDisk();
+    io.to(targetCode).emit('history:cleared', { sessionCode: targetCode, by: auditorName });
+  });
+
+  // Rename session
+  socket.on('session:rename', (newName, sessionCode) => {
+    if (!newName) return;
+    const targetCode = sessionCode ? String(sessionCode).trim().toUpperCase() : socket.data.sessionCode;
+    if (!targetCode || !sharedSessions[targetCode]) return;
+    const session = sharedSessions[targetCode];
+    const auditorName = socket.data.name || connectedAuditors.get(socket.id)?.name || 'Un usuario';
+    session.name = newName.trim();
+    session.lastUpdated = new Date().toISOString();
+    persistSessionsToDisk();
+    io.to(targetCode).emit('session:renamed', {
+      sessionCode: targetCode,
+      sessionName: session.name,
+      by: auditorName
+    });
+  });
+
+  // Restore entire session snapshot
+  socket.on('session:restore', ({ items, name, sessionCode }) => {
+    const targetCode = sessionCode ? String(sessionCode).trim().toUpperCase() : socket.data.sessionCode;
+    if (!targetCode || !sharedSessions[targetCode]) return;
+    const session = sharedSessions[targetCode];
+    const auditorName = socket.data.name || connectedAuditors.get(socket.id)?.name || 'Un usuario';
+    session.countedItems = Array.isArray(items) ? items : [];
+    if (name) session.name = name;
+    session.lastUpdated = new Date().toISOString();
+    persistSessionsToDisk();
+    io.to(targetCode).emit('session:restored', {
+      sessionCode: targetCode,
+      sessionName: session.name,
+      countedItems: session.countedItems,
+      by: auditorName
+    });
+  });
+
+  // Catalog product update broadcast
   socket.on('catalog:productUpdated', (updatedProduct) => {
     const key = getItemKey(updatedProduct);
-    
+
     // Update in sharedCatalog
     const catIdx = sharedCatalog.findIndex((p) => getItemKey(p) === key);
     if (catIdx >= 0) {
@@ -999,36 +1446,47 @@ io.on('connection', (socket) => {
     }
     persistCatalogToDisk();
 
-    // Also update in current counted items if present
-    sharedState.countedItems = sharedState.countedItems.map((item) => {
-      if (getItemKey(item) === key) {
-        return {
-          ...item,
-          descripcion: updatedProduct.descripcion,
-          unidad: updatedProduct.unidad,
-          categoria: updatedProduct.categoria,
-          costo: Number(updatedProduct.costo) || 0,
-          precio: Number(updatedProduct.precio) || 0
-        };
+    // Also update in all sessions where this product is counted
+    Object.values(sharedSessions).forEach(session => {
+      let modified = false;
+      session.countedItems = session.countedItems.map((item) => {
+        if (getItemKey(item) === key) {
+          modified = true;
+          return {
+            ...item,
+            descripcion: updatedProduct.descripcion,
+            unidad: updatedProduct.unidad,
+            categoria: updatedProduct.categoria,
+            costo: Number(updatedProduct.costo) || 0,
+            precio: Number(updatedProduct.precio) || 0
+          };
+        }
+        return item;
+      });
+      if (modified) {
+        session.lastUpdated = new Date().toISOString();
       }
-      return item;
     });
-    persistStateToDisk();
+    persistSessionsToDisk();
 
     io.emit('catalog:syncedProduct', {
-      product: updatedProduct,
-      allCountedItems: sharedState.countedItems
+      product: updatedProduct
     });
   });
 
   // Disconnect
   socket.on('disconnect', () => {
+    const targetCode = socket.data.sessionCode;
     connectedAuditors.delete(socket.id);
     console.log(`[Socket] Desconectado: ${socket.id} (${connectedAuditors.size} usuarios restantes)`);
-    io.emit('users:update', {
-      totalUsers: connectedAuditors.size,
-      auditors: getAuditorsList()
-    });
+    if (targetCode) {
+      const sessionAuditors = getAuditorsForSession(targetCode);
+      io.to(targetCode).emit('users:update', {
+        sessionCode: targetCode,
+        totalUsers: sessionAuditors.length,
+        auditors: sessionAuditors
+      });
+    }
   });
 });
 

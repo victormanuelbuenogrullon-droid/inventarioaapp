@@ -27,3 +27,5 @@ cloudflared.exe
 # Runtime database files
 data/users.json
 data/inventory_state.json
+data/sessions.json
+data/sessions/
