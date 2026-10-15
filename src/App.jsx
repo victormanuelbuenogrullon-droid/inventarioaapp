@@ -1051,7 +1051,6 @@ export default function App() {
             {/* Scanner Control Bar */}
             <ScannerBar
               onProductFound={handleProductFound}
-              onOpenManualSearch={() => setIsManualSearchOpen(true)}
               onOpenGenericModal={handleOpenGenericModal}
               onOpenCamScanner={() => setIsCamScannerOpen(true)}
               scanMode={scanMode}

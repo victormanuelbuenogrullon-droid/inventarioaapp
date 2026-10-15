@@ -1,11 +1,24 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Barcode, Search, Zap, ListPlus, CornerDownLeft, PlusCircle, Check, AlertCircle, Camera, RotateCcw } from 'lucide-react';
-import { findProduct } from '../utils/db';
+import { 
+  Barcode, 
+  Search, 
+  Zap, 
+  ListPlus, 
+  CornerDownLeft, 
+  PlusCircle, 
+  Check, 
+  AlertCircle, 
+  Camera, 
+  RotateCcw,
+  X,
+  ArrowRight
+} from 'lucide-react';
+import { findProduct, searchProducts } from '../utils/db';
 import { playSuccessBeep, playDoubleBeep, playErrorBeep } from '../utils/sound';
+import { formatCurrency } from '../utils/export';
 
 export default function ScannerBar({
   onProductFound,
-  onOpenManualSearch,
   onOpenGenericModal,
   onOpenCamScanner,
   scanMode, // 'auto1' | 'askQty'
@@ -15,9 +28,14 @@ export default function ScannerBar({
   autoReopenCamera = true,
   setAutoReopenCamera
 }) {
-  const [barcodeInput, setBarcodeInput] = useState('');
+  const [searchInput, setSearchInput] = useState('');
   const [isSearching, setIsSearching] = useState(false);
+  const [suggestions, setSuggestions] = useState([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [selectedIndex, setSelectedIndex] = useState(0);
+
   const inputRef = useRef(null);
+  const containerRef = useRef(null);
 
   // Auto focus input on mount only on non-touch desktop devices
   useEffect(() => {
@@ -36,24 +54,111 @@ export default function ScannerBar({
     return () => window.removeEventListener('focus', keepFocus);
   }, []);
 
+  // Live unified search debounced when typing product name or code
+  useEffect(() => {
+    const term = searchInput.trim();
+    if (term.length < 2) {
+      setSuggestions([]);
+      setShowSuggestions(false);
+      setSelectedIndex(0);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      try {
+        const found = await searchProducts(term, 10);
+        setSuggestions(found);
+        setSelectedIndex(0);
+        setShowSuggestions(found.length > 0);
+      } catch (err) {
+        console.error('Unified search error:', err);
+      }
+    }, 120);
+
+    return () => clearTimeout(timer);
+  }, [searchInput]);
+
+  // Dismiss suggestions dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Keyboard navigation inside the search bar (Up, Down, Escape)
+  const handleKeyDown = (e) => {
+    if (showSuggestions && suggestions.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSelectedIndex((prev) => (prev < suggestions.length - 1 ? prev + 1 : prev));
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSelectedIndex((prev) => (prev > 0 ? prev - 1 : 0));
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setShowSuggestions(false);
+        return;
+      }
+    }
+  };
+
+  const handleSelectProduct = (product) => {
+    if (!product) return;
+    setShowSuggestions(false);
+    setSuggestions([]);
+    setSearchInput('');
+    if (soundEnabled) {
+      if (scanMode === 'auto1') playSuccessBeep();
+      else playDoubleBeep();
+    }
+    onProductFound(product, scanMode);
+    setTimeout(() => inputRef.current?.focus(), 50);
+  };
+
   const handleScanSubmit = async (e) => {
     e?.preventDefault();
-    const code = barcodeInput.trim();
-    if (!code) return;
+    const query = searchInput.trim();
+    if (!query) return;
 
     setIsSearching(true);
     try {
-      const product = await findProduct(code);
-      if (product) {
-        if (soundEnabled) {
-          if (scanMode === 'auto1') playSuccessBeep();
-          else playDoubleBeep();
+      // 1. Try exact barcode, SKU or internal code match first (fast O(1))
+      let product = await findProduct(query);
+
+      // 2. If not found by exact code, but suggestions are open and an item is selected
+      if (!product && showSuggestions && suggestions[selectedIndex]) {
+        product = suggestions[selectedIndex];
+      }
+
+      // 3. If still no product, search fuzzy by description / name
+      if (!product) {
+        const matches = await searchProducts(query, 5);
+        if (matches.length === 1) {
+          product = matches[0];
+        } else if (matches.length > 1) {
+          // Keep suggestions open and let user choose
+          setSuggestions(matches);
+          setSelectedIndex(0);
+          setShowSuggestions(true);
+          setIsSearching(false);
+          return;
         }
-        onProductFound(product, scanMode);
-        setBarcodeInput('');
+      }
+
+      if (product) {
+        handleSelectProduct(product);
       } else {
         if (soundEnabled) playErrorBeep();
-        onProductFound(null, scanMode, code);
+        setShowSuggestions(false);
+        onProductFound(null, scanMode, query);
       }
     } catch (err) {
       console.error('Scan error:', err);
@@ -68,55 +173,126 @@ export default function ScannerBar({
     <div className="bg-white border border-slate-200/90 rounded-2xl sm:rounded-3xl p-4 sm:p-5 shadow-sm shadow-slate-200/50 mt-1 sm:mt-2">
       <div className="max-w-4xl mx-auto space-y-3.5">
         
-        {/* 1. HERO SCANNER: Large Barcode Input + Companion Camera Button Next To It */}
+        {/* 1. HERO SCANNER: Unified Barcode & Name Search + Camera Button */}
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 sm:gap-3">
           
-          {/* Main Barcode Scan Input (Large, Centered, High-Contrast) */}
-          <form onSubmit={handleScanSubmit} className="flex-1 relative flex items-center">
-            {/* Barcode Icon Badge */}
-            <div className="absolute left-3.5 sm:left-4 p-1.5 rounded-xl bg-indigo-50 border border-indigo-100 text-indigo-600 pointer-events-none flex items-center justify-center">
-              <Barcode className="w-6 h-6 sm:w-7 h-7" />
-            </div>
+          {/* Main Unified Input (Barcode OR Name Search with Live Suggestions) */}
+          <div ref={containerRef} className="flex-1 relative">
+            <form onSubmit={handleScanSubmit} className="relative flex items-center">
+              {/* Barcode & Search Icon Badge */}
+              <div className="absolute left-3.5 sm:left-4 p-1.5 rounded-xl bg-indigo-50 border border-indigo-100 text-indigo-600 pointer-events-none flex items-center justify-center">
+                <Barcode className="w-6 h-6 sm:w-7 h-7" />
+              </div>
 
-            <input
-              ref={inputRef}
-              type="text"
-              value={barcodeInput}
-              onChange={(e) => setBarcodeInput(e.target.value)}
-              placeholder="Escanea con la pistola lectora o escribe el código de barras..."
-              disabled={isSearching}
-              autoComplete="off"
-              spellCheck="false"
-              className="w-full h-14 sm:h-16 pl-14 sm:pl-16 pr-28 sm:pr-32 bg-slate-50/70 hover:bg-slate-50 focus:bg-white text-slate-900 placeholder-slate-400 rounded-2xl border-2 border-slate-200 focus:border-indigo-600 focus:ring-4 focus:ring-indigo-500/15 focus:outline-none text-base sm:text-lg font-bold tracking-wide transition-all shadow-2xs"
-            />
+              <input
+                ref={inputRef}
+                type="text"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Pasa la pistola lectora o escribe nombre, código o SKU..."
+                disabled={isSearching}
+                autoComplete="off"
+                spellCheck="false"
+                className="w-full h-14 sm:h-16 pl-14 sm:pl-16 pr-28 sm:pr-32 bg-slate-50/70 hover:bg-slate-50 focus:bg-white text-slate-900 placeholder-slate-400 rounded-2xl border-2 border-slate-200 focus:border-indigo-600 focus:ring-4 focus:ring-indigo-500/15 focus:outline-none text-base sm:text-lg font-bold tracking-wide transition-all shadow-2xs"
+              />
 
-            {/* Right Buttons inside input: Clear & Buscar */}
-            <div className="absolute right-2.5 sm:right-3 flex items-center gap-1.5">
-              {barcodeInput && (
+              {/* Right Buttons inside input: Clear & Buscar */}
+              <div className="absolute right-2.5 sm:right-3 flex items-center gap-1.5">
+                {searchInput && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchInput('');
+                      setSuggestions([]);
+                      setShowSuggestions(false);
+                      inputRef.current?.focus();
+                    }}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition-colors"
+                    title="Limpiar campo"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
                 <button
-                  type="button"
-                  onClick={() => {
-                    setBarcodeInput('');
-                    inputRef.current?.focus();
-                  }}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition-colors"
-                  title="Limpiar campo"
+                  type="submit"
+                  disabled={!searchInput.trim() || isSearching}
+                  className="flex items-center gap-1.5 px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 active:bg-slate-950 text-white text-xs sm:text-sm font-bold transition-all disabled:opacity-30 disabled:cursor-not-allowed shadow-xs"
                 >
-                  <X className="w-4 h-4" />
+                  <span>Buscar</span>
+                  <CornerDownLeft className="w-3.5 h-3.5 text-slate-300" />
                 </button>
-              )}
-              <button
-                type="submit"
-                disabled={!barcodeInput.trim() || isSearching}
-                className="flex items-center gap-1.5 px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 active:bg-slate-950 text-white text-xs sm:text-sm font-bold transition-all disabled:opacity-30 disabled:cursor-not-allowed shadow-xs"
-              >
-                <span>Buscar</span>
-                <CornerDownLeft className="w-3.5 h-3.5 text-slate-300" />
-              </button>
-            </div>
-          </form>
+              </div>
+            </form>
 
-          {/* Camera Scanner Companion Button (Right Next to Barcode Input) */}
+            {/* Live Autocomplete / Suggestions Dropdown */}
+            {showSuggestions && suggestions.length > 0 && (
+              <div className="absolute left-0 right-0 top-full mt-2 bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden z-50 max-h-80 sm:max-h-96 overflow-y-auto divide-y divide-slate-100 animate-in fade-in zoom-in-95">
+                {/* Helper info bar */}
+                <div className="px-3.5 py-1.5 bg-slate-50 border-b border-slate-100 flex items-center justify-between text-[11px] text-slate-500 font-medium">
+                  <span className="font-bold text-slate-700">
+                    Coincidencias encontradas ({suggestions.length})
+                  </span>
+                  <span className="text-[10px] text-slate-400 hidden sm:inline">
+                    Usa ↑ ↓ y Enter para elegir o haz clic
+                  </span>
+                </div>
+
+                {/* List of matched items */}
+                {suggestions.map((item, idx) => {
+                  const isSelected = idx === selectedIndex;
+                  return (
+                    <div
+                      key={item.id || idx}
+                      onClick={() => handleSelectProduct(item)}
+                      onMouseEnter={() => setSelectedIndex(idx)}
+                      className={`p-3 sm:p-3.5 cursor-pointer transition-all flex items-center justify-between gap-3 ${
+                        isSelected 
+                          ? 'bg-indigo-50/90 text-indigo-950 border-l-4 border-indigo-600 pl-3' 
+                          : 'hover:bg-slate-50/80 text-slate-800'
+                      }`}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-xs sm:text-sm text-slate-900 truncate">
+                            {item.descripcion}
+                          </span>
+                          <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-slate-100 text-slate-600 font-extrabold uppercase shrink-0">
+                            {item.unidad || 'UNIDAD'}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-2.5 mt-1 text-[11px] text-slate-500 flex-wrap">
+                          {(item.codigoInternacional || item.codigoInterno) && (
+                            <span className="font-mono font-semibold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded text-[10px] sm:text-[11px]">
+                              {item.codigoInternacional || item.codigoInterno}
+                            </span>
+                          )}
+                          {item.categoria && (
+                            <span className="text-[10px] text-slate-400">
+                              {item.categoria}
+                            </span>
+                          )}
+                          {item.precio > 0 && (
+                            <span className="font-bold text-slate-700">
+                              {formatCurrency(item.precio)}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="shrink-0 flex items-center gap-1 text-xs font-bold text-indigo-600">
+                        <span className="hidden sm:inline text-[11px]">Contar</span>
+                        <ArrowRight className="w-4 h-4" />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Camera Scanner Companion Button */}
           <button
             type="button"
             onClick={onOpenCamScanner}
@@ -129,10 +305,10 @@ export default function ScannerBar({
 
         </div>
 
-        {/* 2. OPTIMIZED OPTIONS BAR: Grouped, Clean, Balanced */}
+        {/* 2. OPTIMIZED OPTIONS BAR (Cleaned up, no duplicate manual search button) */}
         <div className="flex flex-wrap items-center justify-between gap-2.5 pt-1 border-t border-slate-100">
           
-          {/* Left Group: Scan Mode Segmented Switcher & Auto-reopen */}
+          {/* Left Group: Scan Mode Switcher & Auto-reopen Camera */}
           <div className="flex flex-wrap items-center gap-2">
             
             {/* Mode Switcher Segmented Control */}
@@ -145,7 +321,7 @@ export default function ScannerBar({
                     ? 'bg-white text-indigo-700 shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
-                title="Al escanear, solicita ingresar la cantidad contada"
+                title="Al escanear o buscar, solicita ingresar la cantidad contada"
               >
                 <ListPlus className={`w-3.5 h-3.5 ${scanMode === 'askQty' ? 'text-indigo-600' : 'text-slate-400'}`} />
                 <span>Pedir Cantidad</span>
@@ -159,7 +335,7 @@ export default function ScannerBar({
                     ? 'bg-white text-amber-700 shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
-                title="Cada escaneo suma +1 automáticamente sin abrir ventana"
+                title="Cada escaneo o selección suma +1 automáticamente sin abrir ventana"
               >
                 <Zap className={`w-3.5 h-3.5 ${scanMode === 'auto1' ? 'text-amber-500 fill-amber-500' : 'text-slate-400'}`} />
                 <span>+1 Rápido</span>
@@ -190,21 +366,8 @@ export default function ScannerBar({
 
           </div>
 
-          {/* Right Group: Search by Name & Add Generic / New Item */}
+          {/* Right Group: Add Generic / New Item on the fly */}
           <div className="flex items-center gap-2 ml-auto">
-            
-            {/* Manual Search Button */}
-            <button
-              type="button"
-              onClick={onOpenManualSearch}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-bold border border-slate-200 transition-all shadow-2xs"
-              title="Buscar producto por nombre si no tiene código de barra"
-            >
-              <Search className="w-3.5 h-3.5 text-slate-500" />
-              <span>Buscar por Nombre</span>
-            </button>
-
-            {/* New / Generic Product Button */}
             <button
               type="button"
               onClick={() => onOpenGenericModal('')}
@@ -214,7 +377,6 @@ export default function ScannerBar({
               <PlusCircle className="w-3.5 h-3.5 text-indigo-300" />
               <span>+ Genérico / Nuevo</span>
             </button>
-
           </div>
 
         </div>
