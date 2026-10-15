@@ -230,15 +230,15 @@ export default function Navbar({
         {/* Right Actions */}
         <div className="flex items-center gap-2">
           
-          {/* Upload CSV button - Admin only */}
+          {/* Upload CSV/Excel button - Admin only */}
           {currentUser?.role === 'admin' && (
             <button
               onClick={onOpenUploader}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 transition-all"
-              title="Subir o actualizar base de datos CSV (Solo Administrador)"
+              title="Subir o actualizar base de datos (CSV o Excel) - Solo Administrador"
             >
               <UploadCloud className="w-3.5 h-3.5 text-slate-500" />
-              <span className="hidden md:inline">Importar CSV</span>
+              <span className="hidden md:inline">Importar Catálogo</span>
             </button>
           )}
 
