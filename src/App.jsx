@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Loader2, UploadCloud, QrCode } from 'lucide-react';
+import { Loader2, UploadCloud, QrCode, Clock } from 'lucide-react';
 import Navbar from './components/Navbar';
 import ScannerBar from './components/ScannerBar';
 import SummaryCards from './components/SummaryCards';
@@ -847,6 +847,25 @@ export default function App() {
         onOpenUserManagement={() => setIsUserManagementOpen(true)}
         onLogout={handleLogout}
       />
+
+      {/* Notice when user's access has 3 or fewer days remaining */}
+      {currentUser?.expiresAt && (() => {
+        const diffMs = new Date(currentUser.expiresAt).getTime() - Date.now();
+        const daysLeft = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+        if (daysLeft > 0 && daysLeft <= 3) {
+          return (
+            <div className="bg-amber-500 text-white px-4 py-2 text-xs flex items-center justify-between shadow-xs sticky top-14 z-30 animate-in fade-in">
+              <div className="flex items-center gap-2">
+                <Clock className="w-4 h-4 text-amber-100 animate-pulse shrink-0" />
+                <span>
+                  <strong>Aviso de Vigencia:</strong> Te {daysLeft === 1 ? 'queda 1 día' : `quedan ${daysLeft} días`} de acceso a la aplicación (vence el {new Date(currentUser.expiresAt).toLocaleDateString()}). Si requieres más tiempo, solicita una renovación a tu Administrador.
+                </span>
+              </div>
+            </div>
+          );
+        }
+        return null;
+      })()}
 
       {/* Local Data Migration Prompt Banner */}
       {localDataMigrationAvailable && (

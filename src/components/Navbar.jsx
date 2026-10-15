@@ -18,7 +18,8 @@ import {
   Share2,
   ShieldCheck,
   LogOut,
-  User
+  User,
+  Clock
 } from 'lucide-react';
 
 export default function Navbar({
@@ -45,6 +46,18 @@ export default function Navbar({
   onOpenUserManagement,
   onLogout
 }) {
+  // Compute remaining access days for the logged-in user
+  let remainingAccessDays = null;
+  let isAccessExpiringSoon = false;
+  let isAccessExpired = false;
+
+  if (currentUser?.expiresAt) {
+    const diffMs = new Date(currentUser.expiresAt).getTime() - Date.now();
+    remainingAccessDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+    isAccessExpiringSoon = remainingAccessDays <= 3 && remainingAccessDays > 0;
+    isAccessExpired = remainingAccessDays <= 0;
+  }
+
   return (
     <header className="bg-white/95 backdrop-blur border-b border-slate-200 sticky top-0 z-40 px-4 py-2.5 shadow-sm">
       <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
@@ -256,23 +269,58 @@ export default function Navbar({
                 </button>
               )}
 
-              {/* User Identity Pill */}
+              {/* User Identity & Remaining Access Days Pill */}
               <div 
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-50 border border-slate-200"
-                title={`Sesión iniciada como @${currentUser.username} (${currentUser.role === 'admin' ? 'Administrador' : 'Auditor'})`}
+                className={`flex items-center gap-2 px-2.5 py-1 rounded-xl border transition-all ${
+                  isAccessExpired
+                    ? 'bg-rose-50 border-rose-300'
+                    : isAccessExpiringSoon
+                      ? 'bg-amber-50 border-amber-300 ring-1 ring-amber-300'
+                      : 'bg-slate-50 border-slate-200'
+                }`}
+                title={`Sesión: @${currentUser.username} (${currentUser.role === 'admin' ? 'Administrador' : 'Auditor'})${
+                  currentUser.expiresAt ? ` • Vence el ${new Date(currentUser.expiresAt).toLocaleDateString()}` : ' • Acceso Permanente'
+                }`}
               >
-                <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white ${
+                <div className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs font-bold text-white shrink-0 shadow-2xs ${
                   currentUser.role === 'admin' ? 'bg-indigo-600' : 'bg-slate-700'
                 }`}>
                   {currentUser.name ? currentUser.name.slice(0, 1).toUpperCase() : 'U'}
                 </div>
-                <div className="hidden md:flex flex-col text-left">
-                  <span className="text-[11px] font-bold text-slate-800 leading-none">
-                    {currentUser.name}
-                  </span>
-                  <span className="text-[9px] text-slate-400 capitalize leading-none mt-0.5">
-                    {currentUser.role === 'admin' ? 'Administrador' : 'Auditor'}
-                  </span>
+
+                <div className="flex flex-col text-left">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-bold text-slate-800 leading-tight">
+                      {currentUser.name}
+                    </span>
+                    <span className="text-[10px] text-slate-400 capitalize hidden lg:inline">
+                      ({currentUser.role === 'admin' ? 'Admin' : 'Auditor'})
+                    </span>
+                  </div>
+
+                  {/* Remaining Access Days Indicator */}
+                  {currentUser.expiresAt ? (
+                    <div className="flex items-center gap-1 mt-0.5">
+                      <Clock className={`w-3 h-3 shrink-0 ${isAccessExpiringSoon ? 'text-amber-600 animate-pulse' : 'text-indigo-600'}`} />
+                      <span className={`text-[10px] font-bold leading-none ${
+                        isAccessExpired
+                          ? 'text-rose-700'
+                          : isAccessExpiringSoon
+                            ? 'text-amber-700 font-extrabold'
+                            : 'text-indigo-700'
+                      }`}>
+                        {isAccessExpired
+                          ? 'Acceso Vencido'
+                          : remainingAccessDays === 1
+                            ? '¡Último día de acceso!'
+                            : `${remainingAccessDays} días de acceso`}
+                      </span>
+                    </div>
+                  ) : (
+                    <span className="text-[9px] text-slate-400 leading-tight">
+                      Acceso permanente
+                    </span>
+                  )}
                 </div>
               </div>
 
