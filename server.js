@@ -272,6 +272,11 @@ try {
   console.error('[Auth] Error al inicializar usuarios:', err);
 }
 
+function isUserExpired(user) {
+  if (!user || !user.expiresAt) return false;
+  return new Date(user.expiresAt).getTime() < Date.now();
+}
+
 // Authentication Middlewares
 function requireAuth(req, res, next) {
   const authHeader = req.headers.authorization;
@@ -286,6 +291,9 @@ function requireAuth(req, res, next) {
   const user = sharedUsers.find((u) => u.id === tokenData.userId);
   if (!user) {
     return res.status(401).json({ error: 'El usuario ya no existe o fue eliminado.' });
+  }
+  if (isUserExpired(user)) {
+    return res.status(403).json({ error: 'Tu período de acceso a la aplicación ha culminado. Comunícate con el Administrador.' });
   }
   req.user = user;
   next();
@@ -329,6 +337,18 @@ app.post('/api/auth/login', (req, res) => {
     return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
   }
 
+  // Check if user access has expired
+  if (isUserExpired(user)) {
+    const expiredDateStr = new Date(user.expiresAt).toLocaleDateString('es-DO', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric'
+    });
+    return res.status(403).json({
+      error: `Tu acceso a la aplicación ha culminado (venció el ${expiredDateStr}). Comunícate con el Administrador para renovar tu acceso.`
+    });
+  }
+
   const token = generateToken(user);
   res.json({
     success: true,
@@ -337,7 +357,9 @@ app.post('/api/auth/login', (req, res) => {
       id: user.id,
       username: user.username,
       name: user.name,
-      role: user.role
+      role: user.role,
+      accessDays: user.accessDays || null,
+      expiresAt: user.expiresAt || null
     }
   });
 });
@@ -350,7 +372,9 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
       id: req.user.id,
       username: req.user.username,
       name: req.user.name,
-      role: req.user.role
+      role: req.user.role,
+      accessDays: req.user.accessDays || null,
+      expiresAt: req.user.expiresAt || null
     }
   });
 });
@@ -362,6 +386,9 @@ app.get('/api/users', requireAdmin, (req, res) => {
     username: u.username,
     name: u.name,
     role: u.role,
+    accessDays: u.accessDays || null,
+    expiresAt: u.expiresAt || null,
+    isExpired: isUserExpired(u),
     createdAt: u.createdAt
   }));
   res.json(safeUsers);
@@ -369,7 +396,7 @@ app.get('/api/users', requireAdmin, (req, res) => {
 
 // Create new user (Admin only)
 app.post('/api/users', requireAdmin, (req, res) => {
-  const { username, password, name, role } = req.body || {};
+  const { username, password, name, role, accessDays } = req.body || {};
 
   if (!username || !password || !name) {
     return res.status(400).json({ error: 'Todos los campos son obligatorios' });
@@ -393,11 +420,21 @@ app.post('/api/users', requireAdmin, (req, res) => {
   const assignedRole = role === 'admin' ? 'admin' : 'auditor';
   const { hash, salt } = hashPassword(String(password));
 
+  // Compute expiration if accessDays is specified
+  let expiresAt = null;
+  let parsedDays = null;
+  if (accessDays !== undefined && accessDays !== null && accessDays !== '' && Number(accessDays) > 0) {
+    parsedDays = Number(accessDays);
+    expiresAt = new Date(Date.now() + parsedDays * 24 * 60 * 60 * 1000).toISOString();
+  }
+
   const newUser = {
     id: `u_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
     username: cleanUsername,
     name: cleanName,
     role: assignedRole,
+    accessDays: parsedDays,
+    expiresAt,
     passwordHash: hash,
     salt,
     createdAt: new Date().toISOString()
@@ -406,7 +443,7 @@ app.post('/api/users', requireAdmin, (req, res) => {
   sharedUsers.push(newUser);
   persistUsersToDisk();
 
-  console.log(`[Auth] Nuevo usuario creado por ${req.user.username}: ${newUser.username} (${newUser.role})`);
+  console.log(`[Auth] Nuevo usuario creado por ${req.user.username}: ${newUser.username} (${newUser.role}, vigencia: ${parsedDays ? parsedDays + ' días' : 'Permanente'})`);
 
   res.json({
     success: true,
@@ -415,7 +452,47 @@ app.post('/api/users', requireAdmin, (req, res) => {
       username: newUser.username,
       name: newUser.name,
       role: newUser.role,
+      accessDays: newUser.accessDays,
+      expiresAt: newUser.expiresAt,
+      isExpired: false,
       createdAt: newUser.createdAt
+    }
+  });
+});
+
+// Update user access duration in days / renewal (Admin only)
+app.put('/api/users/:id/access', requireAdmin, (req, res) => {
+  const { id } = req.params;
+  const { accessDays } = req.body || {};
+
+  const target = sharedUsers.find((u) => u.id === id);
+  if (!target) {
+    return res.status(404).json({ error: 'Usuario no encontrado' });
+  }
+
+  if (accessDays !== undefined && accessDays !== null && accessDays !== '' && Number(accessDays) > 0) {
+    const parsedDays = Number(accessDays);
+    target.accessDays = parsedDays;
+    target.expiresAt = new Date(Date.now() + parsedDays * 24 * 60 * 60 * 1000).toISOString();
+  } else {
+    target.accessDays = null;
+    target.expiresAt = null;
+  }
+
+  persistUsersToDisk();
+  console.log(`[Auth] Vigencia de ${target.username} actualizada a: ${target.accessDays ? target.accessDays + ' días' : 'Permanente'}`);
+
+  res.json({
+    success: true,
+    message: 'Vigencia de acceso actualizada exitosamente',
+    user: {
+      id: target.id,
+      username: target.username,
+      name: target.name,
+      role: target.role,
+      accessDays: target.accessDays,
+      expiresAt: target.expiresAt,
+      isExpired: isUserExpired(target)
     }
   });
 });

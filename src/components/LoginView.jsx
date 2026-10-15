@@ -7,8 +7,7 @@ import {
   EyeOff, 
   Loader2, 
   ShieldCheck, 
-  AlertCircle,
-  KeyRound
+  AlertCircle
 } from 'lucide-react';
 import { loginUser } from '../utils/auth';
 
@@ -154,24 +153,6 @@ export default function LoginView({ onLoginSuccess }) {
               )}
             </button>
           </form>
-
-          {/* Admin Setup Information Box */}
-          <div className="mt-6 pt-5 border-t border-slate-100">
-            <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3.5 text-xs text-slate-600 space-y-1.5">
-              <div className="flex items-center gap-1.5 font-bold text-slate-800">
-                <KeyRound className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                <span>Acceso Inicial de Administrador:</span>
-              </div>
-              <div className="flex items-center gap-4 text-[11px] text-slate-700 font-mono bg-white px-2.5 py-1.5 rounded-lg border border-slate-200">
-                <span>Usuario: <strong className="text-indigo-600 font-bold">admin</strong></span>
-                <span>•</span>
-                <span>Clave: <strong className="text-indigo-600 font-bold">admin</strong></span>
-              </div>
-              <p className="text-[10px] text-slate-500 leading-tight">
-                Como Administrador tendrás el botón exclusivo para crear usuarios a tus auditores o cambiar tu contraseña.
-              </p>
-            </div>
-          </div>
 
         </div>
 

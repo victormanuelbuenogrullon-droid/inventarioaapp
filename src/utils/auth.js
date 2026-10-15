@@ -89,7 +89,7 @@ export async function fetchAllUsers() {
   return data;
 }
 
-export async function createNewUser({ username, password, name, role }) {
+export async function createNewUser({ username, password, name, role, accessDays }) {
   const token = getStoredToken();
   const baseUrl = getServerBaseUrl();
   const response = await fetch(`${baseUrl}/api/users`, {
@@ -98,12 +98,31 @@ export async function createNewUser({ username, password, name, role }) {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${token}`
     },
-    body: JSON.stringify({ username, password, name, role })
+    body: JSON.stringify({ username, password, name, role, accessDays })
   });
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(data.error || 'Error al crear usuario');
+  }
+  return data.user;
+}
+
+export async function updateUserAccess(userId, accessDays) {
+  const token = getStoredToken();
+  const baseUrl = getServerBaseUrl();
+  const response = await fetch(`${baseUrl}/api/users/${userId}/access`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    },
+    body: JSON.stringify({ accessDays })
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || 'Error al actualizar vigencia de acceso');
   }
   return data.user;
 }
