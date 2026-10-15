@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Barcode, 
   Database, 
@@ -11,19 +11,15 @@ import {
   Save, 
   ClipboardList,
   Users,
-  Wifi,
-  WifiOff,
   History,
   QrCode,
-  Share2,
   ShieldCheck,
   LogOut,
-  User,
   Clock,
-  Hash,
   Copy,
   Check,
-  ListOrdered
+  ListOrdered,
+  Menu
 } from 'lucide-react';
 
 export default function Navbar({
@@ -53,6 +49,31 @@ export default function Navbar({
   onLogout
 }) {
   const [codeCopied, setCodeCopied] = useState(false);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const menuRef = useRef(null);
+
+  // Close dropdown menu on click outside or Escape
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (menuRef.current && !menuRef.current.contains(event.target)) {
+        setIsMenuOpen(false);
+      }
+    };
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        setIsMenuOpen(false);
+      }
+    };
+
+    if (isMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('keydown', handleKeyDown);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isMenuOpen]);
 
   const handleCopySessionCode = () => {
     if (!activeSession?.code) return;
@@ -77,104 +98,70 @@ export default function Navbar({
   }
 
   return (
-    <header className="bg-white/95 backdrop-blur border-b border-slate-200 sticky top-0 z-40 px-4 py-2.5 shadow-sm">
-      <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
+    <header className="bg-white/95 backdrop-blur border-b border-slate-200 sticky top-0 z-40 px-3 sm:px-5 py-2.5 shadow-xs">
+      <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 sm:gap-4">
         
-        {/* Brand & Session title */}
-        <div className="flex items-center gap-3">
-          <div className="h-9 w-9 rounded-xl bg-slate-800 flex items-center justify-center shadow-sm text-white font-bold">
+        {/* 1. Left: Brand, Active Session Code & Live Indicator */}
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+          <div className="h-9 w-9 rounded-xl bg-slate-900 flex items-center justify-center shadow-xs text-white shrink-0">
             <Barcode className="w-5 h-5" />
           </div>
           <div>
-            <div className="flex items-center flex-wrap gap-2">
-              <h1 className="text-base font-bold tracking-tight text-slate-900">
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <h1 className="text-sm sm:text-base font-extrabold tracking-tight text-slate-900">
                 InventariosApp
               </h1>
 
               {/* Active Session Code Pill */}
               {activeSession?.code && (
                 <div 
-                  className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-950 shadow-2xs text-[11px]"
+                  className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-0.5 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-950 shadow-2xs text-[10px] sm:text-[11px]"
                   title="Código de sesión para que tus auxiliares puedan unirse"
                 >
-                  <span className="font-extrabold text-indigo-600 uppercase tracking-wider text-[10px]">CÓDIGO:</span>
+                  <span className="font-extrabold text-indigo-600 uppercase tracking-wider text-[9px] sm:text-[10px]">CÓDIGO:</span>
                   <span className="font-mono font-black text-indigo-700 tracking-wide select-all text-xs">
                     {activeSession.code}
                   </span>
                   <button
                     type="button"
                     onClick={handleCopySessionCode}
-                    className="p-1 hover:bg-indigo-100 rounded text-indigo-600 transition-colors"
+                    className="p-0.5 sm:p-1 hover:bg-indigo-100 rounded text-indigo-600 transition-colors"
                     title="Copiar código al portapapeles"
                   >
-                    {codeCopied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                    {codeCopied ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
                   </button>
                 </div>
-              )}
-
-              {/* Switch Session Button (Not available for Auxiliaries) */}
-              {!isCollaborator && (
-                <button
-                  type="button"
-                  onClick={onOpenSessionSelector}
-                  className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition-all shadow-2xs"
-                  title="Cambiar o crear otra sesión de conteo"
-                >
-                  <ListOrdered className="w-3 h-3 text-slate-600" />
-                  <span>Sesiones</span>
-                </button>
               )}
 
               {/* Real-time Collaboration Live Pill */}
               <button
                 type="button"
                 onClick={onOpenAuditorsModal}
-                className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold border transition-all ${
+                className={`flex items-center gap-1 sm:gap-1.5 px-2 py-0.5 rounded-full text-[10px] sm:text-[11px] font-semibold border transition-all ${
                   isOnline
                     ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
                     : 'bg-amber-50 text-amber-800 border-amber-200'
                 }`}
                 title="Haz clic para ver usuarios conectados en este conteo o cambiar tu nombre"
               >
-                <span className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-amber-400'}`} />
-                <span>
+                <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-amber-400'}`} />
+                <span className="hidden sm:inline">
                   {isOnline ? `${onlineUsers} en línea` : 'Reconectando...'}
                 </span>
-                <Users className="w-3 h-3 ml-0.5 text-slate-500" />
-              </button>
-
-              {/* Connect other PCs / Mobile phones button */}
-              <button
-                type="button"
-                onClick={onOpenShareModal}
-                className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 transition-all shadow-2xs"
-                title="Compartir enlace o código QR para conectar otras PCs y celulares"
-              >
-                <QrCode className="w-3 h-3 text-indigo-600" />
-                <span>Conectar Dispositivos</span>
+                <span className="sm:hidden font-bold">
+                  {onlineUsers}
+                </span>
+                <Users className="w-3 h-3 text-slate-500" />
               </button>
             </div>
 
-            <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5">
-              {isCollaborator ? (
-                <span 
-                  className="text-slate-700 px-1 py-0.5 max-w-[170px] truncate text-[11px] font-semibold select-none"
-                  title={sessionName}
-                >
-                  {sessionName}
-                </span>
-              ) : (
-                <input
-                  type="text"
-                  value={sessionName}
-                  onChange={(e) => setSessionName(e.target.value)}
-                  placeholder="Nombre de sesión"
-                  className="bg-transparent border-b border-dashed border-slate-300 hover:border-slate-500 focus:border-slate-800 focus:outline-none text-slate-700 px-1 py-0.5 max-w-[170px] text-[11px] font-medium"
-                  title="Haz clic para renombrar la sesión compartida"
-                />
-              )}
+            {/* Subtitle: Session Name & Current Station */}
+            <div className="flex items-center gap-1.5 text-[10px] sm:text-[11px] text-slate-400 mt-0.5">
+              <span className="truncate max-w-[120px] sm:max-w-[200px] font-medium text-slate-600">
+                {sessionName}
+              </span>
               {currentUserName && (
-                <span className="text-[10px] text-slate-400">
+                <span className="hidden md:inline">
                   • Estación: <strong className="text-slate-600">{currentUserName}</strong>
                 </span>
               )}
@@ -182,21 +169,21 @@ export default function Navbar({
           </div>
         </div>
 
-        {/* Center: Main View Navigation Switcher */}
-        <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 overflow-x-auto max-w-full">
+        {/* 2. Center: Main View Navigation Switcher */}
+        <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200/90 shadow-2xs shrink-0">
           <button
             type="button"
             onClick={() => setActiveView('inventory')}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all shrink-0 ${
+            className={`flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition-all shrink-0 ${
               activeView === 'inventory'
-                ? 'bg-white text-slate-900 shadow-sm'
+                ? 'bg-white text-slate-900 shadow-xs'
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            <ClipboardList className="w-4 h-4 text-slate-600" />
+            <ClipboardList className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-600" />
             <span>Pase de Inventario</span>
             {totalItemsCounted > 0 && (
-              <span className="px-1.5 py-0.2 rounded-full bg-slate-200 text-slate-800 text-[10px] font-bold">
+              <span className="px-1.5 py-0.2 rounded-full bg-slate-200 text-slate-800 text-[10px] font-extrabold">
                 {totalItemsCounted}
               </span>
             )}
@@ -205,16 +192,16 @@ export default function Navbar({
           <button
             type="button"
             onClick={() => setActiveView('catalog')}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all shrink-0 ${
+            className={`flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition-all shrink-0 ${
               activeView === 'catalog'
-                ? 'bg-white text-slate-900 shadow-sm'
+                ? 'bg-white text-slate-900 shadow-xs'
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            <Database className="w-4 h-4 text-slate-600" />
+            <Database className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-600" />
             <span>Catálogo</span>
             {catalogCount > 0 && (
-              <span className="text-[10px] text-slate-500 font-normal">
+              <span className="text-[10px] text-slate-500 font-normal hidden sm:inline">
                 ({catalogCount.toLocaleString()})
               </span>
             )}
@@ -223,186 +210,325 @@ export default function Navbar({
           <button
             type="button"
             onClick={() => setActiveView('history')}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all shrink-0 ${
+            className={`flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition-all shrink-0 ${
               activeView === 'history'
-                ? 'bg-white text-slate-900 shadow-sm'
+                ? 'bg-white text-slate-900 shadow-xs'
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            <History className="w-4 h-4 text-slate-600" />
+            <History className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-600" />
             <span>Historial</span>
             {totalHistoryLogs > 0 && (
-              <span className="px-1.5 py-0.2 rounded-full bg-slate-200 text-slate-800 text-[10px] font-bold">
+              <span className="px-1.5 py-0.2 rounded-full bg-slate-200 text-slate-800 text-[10px] font-extrabold">
                 {totalHistoryLogs}
               </span>
             )}
           </button>
         </div>
 
-
-        {/* Right Actions */}
-        <div className="flex items-center gap-2">
+        {/* 3. Right: Quick Excel & Unified Dropdown Menu */}
+        <div className="flex items-center gap-2 shrink-0">
           
-          {/* Upload CSV/Excel button - Admin only */}
-          {currentUser?.role === 'admin' && (
+          {/* Quick Export to Excel (only visible when inventory has counted items) */}
+          {activeView === 'inventory' && totalItemsCounted > 0 && (
             <button
-              onClick={onOpenUploader}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 transition-all"
-              title="Subir o actualizar base de datos (CSV o Excel) - Solo Administrador"
-            >
-              <UploadCloud className="w-3.5 h-3.5 text-slate-500" />
-              <span className="hidden md:inline">Importar Catálogo</span>
-            </button>
-          )}
-
-          {/* Sound Toggle */}
-          <button
-            onClick={() => setSoundEnabled(!soundEnabled)}
-            className={`p-2 rounded-lg border text-xs transition-colors ${
-              soundEnabled
-                ? 'bg-slate-100 border-slate-300 text-slate-800 hover:bg-slate-200'
-                : 'bg-white border-slate-200 text-slate-400 hover:text-slate-600'
-            }`}
-            title={soundEnabled ? 'Sonido de escáner activado' : 'Sonido desactivado'}
-          >
-            {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
-          </button>
-
-          {/* Guardar / Respaldos (Not for Auxiliaries) */}
-          {!isCollaborator && (
-            <button
-              onClick={onOpenSessionManager}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-white shadow-sm transition-all"
-              title="Guardar punto de restauración o recuperar sesiones anteriores"
-            >
-              <Save className="w-4 h-4 text-slate-300" />
-              <span className="hidden sm:inline">Guardar / Respaldos</span>
-            </button>
-          )}
-
-          {/* Export to Excel */}
-          {activeView === 'inventory' && (
-            <button
+              type="button"
               onClick={onExportExcel}
-              disabled={totalItemsCounted === 0}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-              title="Exportar inventario contado a Excel"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition-all active:scale-95"
+              title="Descargar inventario contado en archivo Excel"
             >
-              <FileSpreadsheet className="w-4 h-4" />
+              <FileSpreadsheet className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">Excel</span>
             </button>
           )}
 
-          {/* Print / Report */}
-          {activeView === 'inventory' && (
+          {/* Unified Dropdown Menu Trigger */}
+          <div className="relative" ref={menuRef}>
             <button
-              onClick={onOpenPrint}
-              disabled={totalItemsCounted === 0}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-sm"
-              title="Imprimir o generar PDF del inventario"
+              type="button"
+              onClick={() => setIsMenuOpen(!isMenuOpen)}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all shadow-2xs active:scale-95 ${
+                isMenuOpen
+                  ? 'bg-slate-900 text-white border-slate-900 ring-2 ring-slate-900/15'
+                  : 'bg-white hover:bg-slate-50 text-slate-800 border-slate-200 hover:border-slate-300'
+              }`}
+              title="Menú de opciones, configuración y administración"
             >
-              <Printer className="w-4 h-4 text-slate-500" />
-              <span className="hidden md:inline">Imprimir</span>
+              <div className={`w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-extrabold ${
+                currentUser?.role === 'admin' 
+                  ? 'bg-indigo-600 text-white' 
+                  : isCollaborator 
+                    ? 'bg-amber-600 text-white' 
+                    : 'bg-slate-700 text-white'
+              }`}>
+                {currentUser?.name ? currentUser.name.slice(0, 1).toUpperCase() : 'U'}
+              </div>
+              <span className="font-bold text-slate-800 hidden sm:inline">
+                Menú
+              </span>
+              <Menu className={`w-4 h-4 ${isMenuOpen ? 'text-white' : 'text-slate-600'}`} />
             </button>
-          )}
 
-          {/* Reset / Clear (Not for Auxiliaries) */}
-          {activeView === 'inventory' && !isCollaborator && (
-            <button
-              onClick={onClearCount}
-              disabled={totalItemsCounted === 0}
-              className="p-1.5 rounded-lg text-xs font-medium bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-              title="Limpiar conteo actual"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
-          )}
-
-          {/* User Profile, Admin User Management & Logout */}
-          {currentUser && (
-            <div className="flex items-center gap-1.5 pl-2 sm:pl-3 border-l border-slate-200">
-              
-              {/* Admin-only User Management Button */}
-              {currentUser.role === 'admin' && (
-                <button
-                  type="button"
-                  onClick={onOpenUserManagement}
-                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 transition-all shadow-2xs"
-                  title="Gestionar Usuarios (Crear o Eliminar Cuentas)"
-                >
-                  <ShieldCheck className="w-3.5 h-3.5 text-indigo-600" />
-                  <span className="hidden sm:inline">Usuarios</span>
-                </button>
-              )}
-
-              {/* User Identity & Remaining Access Days Pill */}
-              <div 
-                className={`flex items-center gap-2 px-2.5 py-1 rounded-xl border transition-all ${
-                  isAccessExpired
-                    ? 'bg-rose-50 border-rose-300'
-                    : isAccessExpiringSoon
-                      ? 'bg-amber-50 border-amber-300 ring-1 ring-amber-300'
-                      : 'bg-slate-50 border-slate-200'
-                }`}
-                title={`Sesión: @${currentUser.username} (${currentUser.role === 'admin' ? 'Administrador' : isCollaborator ? 'Auxiliar' : 'Auditor'})${
-                  currentUser.expiresAt ? ` • Vence el ${new Date(currentUser.expiresAt).toLocaleDateString()}` : ' • Acceso Permanente'
-                }`}
-              >
-                <div className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs font-bold text-white shrink-0 shadow-2xs ${
-                  currentUser.role === 'admin' ? 'bg-indigo-600' : 'bg-slate-700'
-                }`}>
-                  {currentUser.name ? currentUser.name.slice(0, 1).toUpperCase() : 'U'}
-                </div>
-
-                <div className="flex flex-col text-left">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs font-bold text-slate-800 leading-tight">
-                      {currentUser.name}
-                    </span>
-                    <span className="text-[10px] text-slate-400 capitalize hidden lg:inline">
-                      ({currentUser.role === 'admin' ? 'Admin' : isCollaborator ? 'Auxiliar' : 'Auditor'})
-                    </span>
+            {/* Menu Dropdown Popup */}
+            {isMenuOpen && (
+              <div className="absolute right-0 top-full mt-2 w-72 sm:w-80 max-h-[85vh] overflow-y-auto bg-white rounded-2xl shadow-2xl border border-slate-200/90 py-2.5 z-50 animate-in fade-in zoom-in-95 origin-top-right">
+                
+                {/* User Profile & Access Validity Header */}
+                <div className="px-4 py-2.5 border-b border-slate-100 bg-slate-50/60">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center text-xs font-extrabold text-white shrink-0 shadow-2xs ${
+                      currentUser?.role === 'admin' ? 'bg-indigo-600' : isCollaborator ? 'bg-amber-600' : 'bg-slate-800'
+                    }`}>
+                      {currentUser?.name ? currentUser.name.slice(0, 1).toUpperCase() : 'U'}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="font-bold text-xs text-slate-900 truncate">
+                        {currentUser?.name || 'Usuario'}
+                      </div>
+                      <div className="text-[10px] text-slate-400 truncate">
+                        @{currentUser?.username || 'usuario'} • {currentUser?.role === 'admin' ? 'Administrador' : isCollaborator ? 'Auxiliar' : 'Auditor'}
+                      </div>
+                    </div>
                   </div>
 
-                  {/* Remaining Access Days Indicator */}
-                  {currentUser.expiresAt ? (
-                    <div className="flex items-center gap-1 mt-0.5">
-                      <Clock className={`w-3 h-3 shrink-0 ${isAccessExpiringSoon ? 'text-amber-600 animate-pulse' : 'text-indigo-600'}`} />
-                      <span className={`text-[10px] font-bold leading-none ${
-                        isAccessExpired
-                          ? 'text-rose-700'
-                          : isAccessExpiringSoon
-                            ? 'text-amber-700 font-extrabold'
-                            : 'text-indigo-700'
+                  {/* Access Expiration Notice */}
+                  <div className="mt-2 pt-2 border-t border-slate-200/60 flex items-center justify-between text-[10px]">
+                    <span className="text-slate-500 font-medium">Vigencia de acceso:</span>
+                    {currentUser?.expiresAt ? (
+                      <span className={`font-bold flex items-center gap-1 ${
+                        isAccessExpired 
+                          ? 'text-rose-600' 
+                          : isAccessExpiringSoon 
+                            ? 'text-amber-600' 
+                            : 'text-indigo-600'
                       }`}>
+                        <Clock className="w-3 h-3" />
                         {isAccessExpired
-                          ? 'Acceso Vencido'
+                          ? 'Vencido'
                           : remainingAccessDays === 1
-                            ? '¡Último día de acceso!'
-                            : `${remainingAccessDays} días de acceso`}
+                            ? 'Último día'
+                            : `${remainingAccessDays} días restantes`}
                       </span>
-                    </div>
-                  ) : (
-                    <span className="text-[9px] text-slate-400 leading-tight">
-                      Acceso permanente
-                    </span>
-                  )}
+                    ) : (
+                      <span className="font-bold text-emerald-600 flex items-center gap-1">
+                        <Check className="w-3 h-3" /> Acceso permanente
+                      </span>
+                    )}
+                  </div>
                 </div>
+
+                {/* Administration & Catalog Section */}
+                <div className="px-2 py-1.5">
+                  <div className="px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                    Administración y Catálogo
+                  </div>
+
+                  {/* Import Catalog (CSV / Excel) - Admin Only */}
+                  {currentUser?.role === 'admin' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsMenuOpen(false);
+                        onOpenUploader();
+                      }}
+                      className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left hover:bg-slate-50 transition-colors group"
+                    >
+                      <div className="w-7 h-7 rounded-lg bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 shrink-0 group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                        <UploadCloud className="w-3.5 h-3.5" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs font-bold text-slate-800">Importar Catálogo</div>
+                        <div className="text-[10px] text-slate-400">Subir archivo CSV o Excel de productos</div>
+                      </div>
+                    </button>
+                  )}
+
+                  {/* User Management - Admin Only */}
+                  {currentUser?.role === 'admin' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsMenuOpen(false);
+                        onOpenUserManagement();
+                      }}
+                      className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left hover:bg-slate-50 transition-colors group"
+                    >
+                      <div className="w-7 h-7 rounded-lg bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 shrink-0 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                        <ShieldCheck className="w-3.5 h-3.5" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs font-bold text-slate-800">Administrador de Usuarios</div>
+                        <div className="text-[10px] text-slate-400">Crear o renovar cuentas de auxiliares</div>
+                      </div>
+                    </button>
+                  )}
+
+                  {/* Save / Backups - Non-Collaborators only */}
+                  {!isCollaborator && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsMenuOpen(false);
+                        onOpenSessionManager();
+                      }}
+                      className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left hover:bg-slate-50 transition-colors group"
+                    >
+                      <div className="w-7 h-7 rounded-lg bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 shrink-0 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+                        <Save className="w-3.5 h-3.5" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs font-bold text-slate-800">Guardar / Respaldos</div>
+                        <div className="text-[10px] text-slate-400">Puntos de restauración y copias locales</div>
+                      </div>
+                    </button>
+                  )}
+
+                  {/* Switch or Create Session - Non-collaborator only */}
+                  {!isCollaborator && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsMenuOpen(false);
+                        onOpenSessionSelector();
+                      }}
+                      className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left hover:bg-slate-50 transition-colors group"
+                    >
+                      <div className="w-7 h-7 rounded-lg bg-amber-50 border border-amber-100 flex items-center justify-center text-amber-600 shrink-0 group-hover:bg-amber-600 group-hover:text-white transition-colors">
+                        <ListOrdered className="w-3.5 h-3.5" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs font-bold text-slate-800">Gestionar Sesiones</div>
+                        <div className="text-[10px] text-slate-400">Cambiar o crear otro conteo de inventario</div>
+                      </div>
+                    </button>
+                  )}
+
+                  {/* Connect other devices (QR / Share) */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsMenuOpen(false);
+                      onOpenShareModal();
+                    }}
+                    className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left hover:bg-slate-50 transition-colors group"
+                  >
+                    <div className="w-7 h-7 rounded-lg bg-violet-50 border border-violet-100 flex items-center justify-center text-violet-600 shrink-0 group-hover:bg-violet-600 group-hover:text-white transition-colors">
+                      <QrCode className="w-3.5 h-3.5" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-bold text-slate-800">Conectar Dispositivos</div>
+                      <div className="text-[10px] text-slate-400">Compartir código QR para móviles o PCs</div>
+                    </div>
+                  </button>
+                </div>
+
+                {/* Tools and Print Reports Section */}
+                <div className="px-2 py-1.5 border-t border-slate-100">
+                  <div className="px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                    Herramientas y Reportes
+                  </div>
+
+                  {/* Print Report */}
+                  <button
+                    type="button"
+                    disabled={totalItemsCounted === 0}
+                    onClick={() => {
+                      setIsMenuOpen(false);
+                      onOpenPrint();
+                    }}
+                    className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left hover:bg-slate-50 transition-colors group disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <div className="w-7 h-7 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-600 shrink-0 group-hover:bg-slate-800 group-hover:text-white transition-colors">
+                      <Printer className="w-3.5 h-3.5" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-bold text-slate-800">Imprimir Reporte</div>
+                      <div className="text-[10px] text-slate-400">Generar PDF o imprimir conteo</div>
+                    </div>
+                  </button>
+
+                  {/* Export to Excel */}
+                  <button
+                    type="button"
+                    disabled={totalItemsCounted === 0}
+                    onClick={() => {
+                      setIsMenuOpen(false);
+                      onExportExcel();
+                    }}
+                    className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left hover:bg-slate-50 transition-colors group disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <div className="w-7 h-7 rounded-lg bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 shrink-0 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+                      <FileSpreadsheet className="w-3.5 h-3.5" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-bold text-slate-800">Descargar Excel (.xlsx)</div>
+                      <div className="text-[10px] text-slate-400">Exportar planilla con cálculos y costos</div>
+                    </div>
+                  </button>
+
+                  {/* Sound Toggle Row */}
+                  <div className="flex items-center justify-between px-2.5 py-2 rounded-xl hover:bg-slate-50 transition-colors">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-7 h-7 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-600 shrink-0">
+                        {soundEnabled ? <Volume2 className="w-3.5 h-3.5 text-emerald-600" /> : <VolumeX className="w-3.5 h-3.5 text-slate-400" />}
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-slate-800">Sonido de Escaneo</div>
+                        <div className="text-[10px] text-slate-400">Pitido al leer código de barra</div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSoundEnabled(!soundEnabled)}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold transition-all border ${
+                        soundEnabled 
+                          ? 'bg-emerald-50 text-emerald-800 border-emerald-200' 
+                          : 'bg-slate-100 text-slate-500 border-slate-200'
+                      }`}
+                    >
+                      {soundEnabled ? 'ACTIVO' : 'SILENCIO'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Danger & Exit Section */}
+                <div className="px-2 pt-1.5 pb-1 border-t border-slate-100 bg-slate-50/50">
+                  {/* Clear count */}
+                  {!isCollaborator && (
+                    <button
+                      type="button"
+                      disabled={totalItemsCounted === 0}
+                      onClick={() => {
+                        setIsMenuOpen(false);
+                        onClearCount();
+                      }}
+                      className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left hover:bg-rose-50 text-rose-600 transition-colors group disabled:opacity-40 disabled:cursor-not-allowed mb-1"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                      <div className="flex-1 min-w-0">
+                        <span className="text-xs font-bold">Limpiar Conteo Actual</span>
+                      </div>
+                    </button>
+                  )}
+
+                  {/* Logout Button */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsMenuOpen(false);
+                      onLogout();
+                    }}
+                    className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs transition-colors border border-rose-200/80"
+                  >
+                    <LogOut className="w-3.5 h-3.5 text-rose-600" />
+                    <span>Cerrar Sesión</span>
+                  </button>
+                </div>
+
               </div>
+            )}
+          </div>
 
-              {/* Logout Button */}
-              <button
-                type="button"
-                onClick={onLogout}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 transition-all shadow-2xs"
-                title="Cerrar sesión"
-              >
-                <LogOut className="w-3.5 h-3.5" />
-                <span>Salir</span>
-              </button>
-
-            </div>
-          )}
         </div>
 
       </div>
