@@ -7,6 +7,7 @@ export default function QuantityModal({
   product,
   currentCount = 0,
   isEditing = false,
+  isAdmin = false,
   onConfirm,
   onClose
 }) {
@@ -14,7 +15,7 @@ export default function QuantityModal({
   const [description, setDescription] = useState('');
   const [cost, setCost] = useState('0');
   const [price, setPrice] = useState('0');
-  const [saveToCatalog, setSaveToCatalog] = useState(true);
+  const [saveToCatalog, setSaveToCatalog] = useState(isAdmin);
   const [isQuickEditOpen, setIsQuickEditOpen] = useState(isEditing);
   const inputRef = useRef(null);
 
@@ -28,7 +29,7 @@ export default function QuantityModal({
       setDescription(product.descripcion || '');
       setCost(product.costo !== undefined && product.costo !== null ? product.costo.toString() : '0');
       setPrice(product.precio !== undefined && product.precio !== null ? product.precio.toString() : '0');
-      setSaveToCatalog(true);
+      setSaveToCatalog(isAdmin);
       // When editing an existing item from table, expand quick edit fields by default
       setIsQuickEditOpen(isEditing);
 
@@ -67,7 +68,7 @@ export default function QuantityModal({
       precio: numPrice
     };
 
-    onConfirm(updatedProduct, numQty, isEditing, hasProductChanges && saveToCatalog);
+    onConfirm(updatedProduct, numQty, isEditing, hasProductChanges, isAdmin && saveToCatalog);
   };
 
   const handleKeyDown = (e) => {
@@ -261,16 +262,22 @@ export default function QuantityModal({
                   </div>
                 </div>
 
-                {/* Save to Catalog Checkbox */}
-                <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-700 hover:text-slate-900 pt-1 select-none">
-                  <input
-                    type="checkbox"
-                    checked={saveToCatalog}
-                    onChange={(e) => setSaveToCatalog(e.target.checked)}
-                    className="w-3.5 h-3.5 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300"
-                  />
-                  <span>Actualizar también en el catálogo general compartido</span>
-                </label>
+                {/* Save to Catalog Checkbox - Admin Only vs Session Notice */}
+                {isAdmin ? (
+                  <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-700 hover:text-slate-900 pt-1 select-none">
+                    <input
+                      type="checkbox"
+                      checked={saveToCatalog}
+                      onChange={(e) => setSaveToCatalog(e.target.checked)}
+                      className="w-3.5 h-3.5 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300"
+                    />
+                    <span className="font-medium text-slate-800">Actualizar también en el catálogo general compartido (Administrador)</span>
+                  </label>
+                ) : (
+                  <div className="flex items-start gap-2 p-2.5 rounded-lg bg-amber-50/80 border border-amber-200/80 text-[11px] text-amber-900 font-medium mt-1">
+                    <span>🔒 <strong>Modo Sesión:</strong> La edición de descripción, costo o precio se aplicará exclusivamente a tu sesión de conteo. La base de datos principal no será alterada.</span>
+                  </div>
+                )}
               </div>
             )}
           </div>

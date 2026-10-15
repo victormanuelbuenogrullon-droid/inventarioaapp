@@ -9,11 +9,17 @@ export function getServerBaseUrl() {
 
 export async function uploadCatalogToServer(products) {
   const baseUrl = getServerBaseUrl();
+  const token = localStorage.getItem('inventariosapp_token_v1');
+  const headers = {
+    'Content-Type': 'application/json'
+  };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
   const response = await fetch(`${baseUrl}/api/catalog/upload`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
+    headers,
     body: JSON.stringify({ products })
   });
 
@@ -56,14 +62,20 @@ export async function fetchNetworkInfo() {
   }
 }
 
-export async function migrateLocalDataToServer({ sessionName, countedItems, historyLogs, catalog }) {
+export async function migrateLocalDataToServer({ sessionCode, sessionName, countedItems, historyLogs, catalog }) {
   const baseUrl = getServerBaseUrl();
+  const token = localStorage.getItem('inventariosapp_token_v1');
+  const headers = {
+    'Content-Type': 'application/json'
+  };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
   const response = await fetch(`${baseUrl}/api/migrate-from-client`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({ sessionName, countedItems, historyLogs, catalog })
+    headers,
+    body: JSON.stringify({ sessionCode, sessionName, countedItems, historyLogs, catalog })
   });
 
   if (!response.ok) {

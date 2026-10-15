@@ -903,8 +903,8 @@ app.get('/api/catalog/meta', (req, res) => {
   });
 });
 
-// Upload entire catalog from a client (e.g. User uploads CSV)
-app.post('/api/catalog/upload', (req, res) => {
+// Upload entire catalog from a client (e.g. User uploads CSV) - ADMIN ONLY
+app.post('/api/catalog/upload', requireAdmin, (req, res) => {
   const { products } = req.body;
   if (Array.isArray(products) && products.length > 0) {
     sharedCatalog = products;
@@ -916,7 +916,7 @@ app.post('/api/catalog/upload', (req, res) => {
       updatedAt: new Date().toISOString()
     });
 
-    console.log(`[Catalog] Catálogo actualizado por usuario: ${products.length} productos.`);
+    console.log(`[Catalog] Catálogo actualizado por administrador (${req.user.username}): ${products.length} productos.`);
     return res.json({ success: true, total: products.length });
   }
   res.status(400).json({ error: 'Formato de productos inválido' });
@@ -957,14 +957,25 @@ app.get('/api/network-info', (req, res) => {
 app.post('/api/migrate-from-client', (req, res) => {
   const { sessionCode, sessionName, countedItems, historyLogs, catalog } = req.body;
 
+  // Authenticate user token if provided
+  const authHeader = req.headers.authorization;
+  const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+  const tokenData = token ? verifyToken(token) : null;
+  const isAdmin = tokenData && tokenData.role === 'admin';
+
+  // Only Administrator can replace or modify the shared master catalog!
   if (Array.isArray(catalog) && catalog.length > 0) {
-    sharedCatalog = catalog;
-    persistCatalogToDisk();
-    io.emit('catalog:updated', {
-      totalProducts: sharedCatalog.length,
-      updatedAt: new Date().toISOString()
-    });
-    console.log(`[Migrate] Catálogo subido desde navegador local: ${catalog.length} productos.`);
+    if (isAdmin) {
+      sharedCatalog = catalog;
+      persistCatalogToDisk();
+      io.emit('catalog:updated', {
+        totalProducts: sharedCatalog.length,
+        updatedAt: new Date().toISOString()
+      });
+      console.log(`[Migrate] Catálogo maestro subido por administrador (${tokenData.username}): ${catalog.length} productos.`);
+    } else {
+      console.warn(`[Migrate] Ignorando subida de catálogo maestro de usuario no administrador (${tokenData?.username || 'anónimo'}).`);
+    }
   }
 
   const targetCode = sessionCode ? String(sessionCode).trim().toUpperCase() : Object.keys(sharedSessions)[0] || 'INV-1001';
@@ -1019,6 +1030,7 @@ app.post('/api/migrate-from-client', (req, res) => {
 io.on('connection', (socket) => {
   let defaultName = `Auditor #${socket.id.slice(-4)}`;
   let defaultSession = null;
+  let defaultRole = 'auditor';
 
   // Extract user identity from handshake auth token if available
   const clientToken = socket.handshake.auth?.token || socket.handshake.query?.token;
@@ -1026,6 +1038,9 @@ io.on('connection', (socket) => {
     const verified = verifyToken(clientToken);
     if (verified && verified.name) {
       defaultName = verified.name;
+    }
+    if (verified && verified.role) {
+      defaultRole = verified.role;
     }
     if (verified && verified.sessionCode) {
       defaultSession = verified.sessionCode;
@@ -1037,6 +1052,7 @@ io.on('connection', (socket) => {
 
   socket.data.name = defaultName;
   socket.data.sessionCode = initialSession;
+  socket.data.role = defaultRole;
 
   connectedAuditors.set(socket.id, {
     id: socket.id,
@@ -1433,8 +1449,13 @@ io.on('connection', (socket) => {
     });
   });
 
-  // Catalog product update broadcast
+  // Catalog product update broadcast (ADMIN ONLY)
   socket.on('catalog:productUpdated', (updatedProduct) => {
+    if (socket.data.role !== 'admin') {
+      console.warn(`[Catalog] Intento denegado de modificar catálogo maestro por usuario no administrador: ${socket.id} (${socket.data.name})`);
+      return;
+    }
+
     const key = getItemKey(updatedProduct);
 
     // Update in sharedCatalog

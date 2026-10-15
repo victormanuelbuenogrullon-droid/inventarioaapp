@@ -30,6 +30,7 @@ export default function ShareSessionModal({
   historyLogs = [],
   catalogCount = 0,
   activeSession = null,
+  isAdmin = false,
   onSyncSuccess
 }) {
   const [activeTab, setActiveTab] = useState('cloud'); // 'cloud' | 'wifi' | 'sync'
@@ -176,18 +177,20 @@ export default function ShareSessionModal({
             <span>Red Local Wi-Fi</span>
           </button>
 
-          <button
-            type="button"
-            onClick={() => setActiveTab('sync')}
-            className={`flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold border-b-2 transition-all ${
-              activeTab === 'sync'
-                ? 'border-amber-600 text-amber-700 bg-white rounded-t-lg'
-                : 'border-transparent text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <UploadCloud className="w-4 h-4 text-amber-500" />
-            <span>Publicar Datos Locales</span>
-          </button>
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => setActiveTab('sync')}
+              className={`flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold border-b-2 transition-all ${
+                activeTab === 'sync'
+                  ? 'border-amber-600 text-amber-700 bg-white rounded-t-lg'
+                  : 'border-transparent text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <UploadCloud className="w-4 h-4 text-amber-500" />
+              <span>Publicar Datos Locales</span>
+            </button>
+          )}
         </div>
 
         {/* Modal Body */}
@@ -353,7 +356,7 @@ export default function ShareSessionModal({
           )}
 
           {/* TAB 3: MIGRATE / UPLOAD LOCAL DATA TO SERVER */}
-          {activeTab === 'sync' && (
+          {isAdmin && activeTab === 'sync' && (
             <div className="space-y-4">
               <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-4 text-xs text-amber-900 space-y-2">
                 <p className="font-bold flex items-center gap-1.5 text-amber-950">

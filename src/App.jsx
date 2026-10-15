@@ -274,11 +274,11 @@ export default function App() {
         // Servidor no disponible o local offline
       }
 
-      if (localCount === 0) {
+      if (localCount === 0 && currentUser?.role === 'admin') {
         setIsUploaderOpen(true);
       }
     })();
-  }, [syncCatalogFromServer]);
+  }, [syncCatalogFromServer, currentUser]);
 
 
   // Sync to LocalStorage
@@ -647,7 +647,8 @@ export default function App() {
   const handleSaveGenericProduct = async (product, quantity, saveToCatalog) => {
     applyCountToItem(product, quantity, true);
 
-    if (saveToCatalog) {
+    // Only Admin can persist to master catalog
+    if (saveToCatalog && currentUser?.role === 'admin') {
       try {
         await saveSingleProduct(product);
         const newCount = await getCatalogCount();
@@ -661,21 +662,29 @@ export default function App() {
     setGenericModalData({ isOpen: false, initialCode: '' });
   };
 
-  // Open Edit Product in catalog modal
+  // Open Edit Product in catalog modal (Admin only)
   const handleOpenEditProduct = (product) => {
+    if (currentUser?.role !== 'admin') {
+      alert('Solo el Administrador tiene permisos para modificar la base de datos principal.');
+      return;
+    }
     setEditProductModalData({
       isOpen: true,
       product
     });
   };
 
-  // Save edited product to DB & active inventory
+  // Save edited product to DB & active inventory (Admin only)
   const handleSaveEditedProduct = async (updatedProduct) => {
+    if (currentUser?.role !== 'admin') {
+      alert('Permiso denegado. Solo el Administrador puede editar la base de datos principal.');
+      return;
+    }
     try {
       await updateProductInDB(updatedProduct);
       emitCatalogProductUpdated(updatedProduct);
 
-      // Local update
+      // Local update in counted items
       setCountedItems((prevItems) => {
         const key = getItemKey(updatedProduct);
         return prevItems.map((item) => {
@@ -695,7 +704,7 @@ export default function App() {
 
       setLastScannedMessage({
         type: 'success',
-        text: `✏️ Producto "${updatedProduct.descripcion}" actualizado en la base de datos compartida.`,
+        text: `✏️ Producto "${updatedProduct.descripcion}" actualizado en la base de datos principal.`,
         time: new Date().toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
       });
 
@@ -705,19 +714,21 @@ export default function App() {
     }
   };
 
-  // Confirm quantity from modal
-  const handleQuantityConfirm = async (product, enteredQty, isEditing, hasProductChanges = false) => {
-    // 1. If product details (descripcion, costo, precio) were updated, persist to DB & broadcast
-    if (hasProductChanges) {
+  // Confirm quantity from modal (Quick edits apply to current session only, unless admin chooses to update master catalog)
+  const handleQuantityConfirm = async (product, enteredQty, isEditing, hasProductChanges = false, saveToCatalog = false) => {
+    const isAdmin = currentUser?.role === 'admin';
+
+    // 1. If product details (descripcion, costo, precio) were changed, ONLY persist to master catalog if user is Admin AND checked saveToCatalog
+    if (hasProductChanges && isAdmin && saveToCatalog) {
       try {
         await updateProductInDB(product);
         emitCatalogProductUpdated(product);
       } catch (err) {
-        console.warn('Error al actualizar datos del producto:', err);
+        console.warn('Error al actualizar datos del producto en catálogo maestro:', err);
       }
     }
 
-    // 2. Apply count (passes updated product)
+    // 2. Apply count to this session (passes updated product so that current session's counted items have the new description/cost/price!)
     if (isEditing) {
       applyCountToItem(product, enteredQty, true);
     } else {
@@ -727,9 +738,12 @@ export default function App() {
     setQuantityModalData({ isOpen: false, product: null, currentCount: 0, isEditing: false });
 
     if (hasProductChanges) {
+      const isMasterUpdated = isAdmin && saveToCatalog;
       setLastScannedMessage({
         type: 'success',
-        text: `✏️ Datos de "${product.descripcion}" actualizados en catálogo e inventario.`,
+        text: isMasterUpdated
+          ? `✏️ Datos de "${product.descripcion}" actualizados en catálogo principal e inventario.`
+          : `✏️ Datos de "${product.descripcion}" modificados para esta sesión de conteo.`,
         time: new Date().toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
       });
     }
@@ -979,8 +993,8 @@ export default function App() {
         return null;
       })()}
 
-      {/* Local Data Migration Prompt Banner */}
-      {localDataMigrationAvailable && (
+      {/* Local Data Migration Prompt Banner (Admin Only) */}
+      {localDataMigrationAvailable && currentUser?.role === 'admin' && (
         <div className="bg-amber-600 text-white px-4 py-2.5 shadow-md flex flex-wrap items-center justify-between gap-3 animate-in fade-in sticky top-14 z-30">
           <div className="flex items-center gap-2 text-xs">
             <UploadCloud className="w-5 h-5 shrink-0 animate-bounce text-amber-200" />
@@ -1049,9 +1063,10 @@ export default function App() {
         {activeView === 'catalog' && (
           <CatalogManagerView
             onBackToInventory={() => setActiveView('inventory')}
-            onEditProduct={handleOpenEditProduct}
-            onAddNewProduct={() => handleOpenGenericModal('')}
+            onEditProduct={currentUser?.role === 'admin' ? handleOpenEditProduct : null}
+            onAddNewProduct={currentUser?.role === 'admin' ? () => handleOpenGenericModal('') : null}
             catalogCount={catalogCount}
+            isAdmin={currentUser?.role === 'admin'}
           />
         )}
 
@@ -1077,15 +1092,17 @@ export default function App() {
       </footer>
 
       {/* Modals */}
-      <CsvUploaderModal
-        isOpen={isUploaderOpen}
-        onClose={() => setIsUploaderOpen(false)}
-        onImportSuccess={(newCount) => {
-          setCatalogCount(newCount);
-          getCatalogCount().then(setCatalogCount);
-        }}
-        currentCount={catalogCount}
-      />
+      {currentUser?.role === 'admin' && (
+        <CsvUploaderModal
+          isOpen={isUploaderOpen}
+          onClose={() => setIsUploaderOpen(false)}
+          onImportSuccess={(newCount) => {
+            setCatalogCount(newCount);
+            getCatalogCount().then(setCatalogCount);
+          }}
+          currentCount={catalogCount}
+        />
+      )}
 
       <CameraScannerModal
         isOpen={isCamScannerOpen}
@@ -1105,6 +1122,7 @@ export default function App() {
       <GenericProductModal
         isOpen={genericModalData.isOpen}
         initialCode={genericModalData.initialCode}
+        isAdmin={currentUser?.role === 'admin'}
         onClose={() => setGenericModalData({ isOpen: false, initialCode: '' })}
         onSave={handleSaveGenericProduct}
       />
@@ -1144,6 +1162,7 @@ export default function App() {
         historyLogs={historyLogs}
         catalogCount={catalogCount}
         activeSession={activeSession}
+        isAdmin={currentUser?.role === 'admin'}
         onSyncSuccess={() => {
           setLocalDataMigrationAvailable(false);
           setLastScannedMessage({
@@ -1158,6 +1177,7 @@ export default function App() {
         product={quantityModalData.product}
         currentCount={quantityModalData.currentCount}
         isEditing={quantityModalData.isEditing}
+        isAdmin={currentUser?.role === 'admin'}
         onConfirm={handleQuantityConfirm}
         onClose={() => {
           isCameraScanRef.current = false;

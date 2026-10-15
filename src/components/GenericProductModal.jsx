@@ -7,6 +7,7 @@ const COMMON_UNITS = ['UNIDAD', 'PAQUETE', 'CAJA', 'LIBRA', 'KILO', 'BOLSA', 'LI
 export default function GenericProductModal({
   isOpen,
   initialCode = '',
+  isAdmin = false,
   onClose,
   onSave
 }) {
@@ -17,7 +18,7 @@ export default function GenericProductModal({
   const [precio, setPrecio] = useState('');
   const [cantidad, setCantidad] = useState('1');
   const [categoria, setCategoria] = useState('GENERICOS');
-  const [saveToCatalog, setSaveToCatalog] = useState(true);
+  const [saveToCatalog, setSaveToCatalog] = useState(isAdmin);
 
   const descInputRef = useRef(null);
 
@@ -35,7 +36,7 @@ export default function GenericProductModal({
       setPrecio('');
       setCantidad('1');
       setCategoria('GENERICOS');
-      setSaveToCatalog(true);
+      setSaveToCatalog(isAdmin);
 
       setTimeout(() => {
         descInputRef.current?.focus();
@@ -76,7 +77,7 @@ export default function GenericProductModal({
       isGeneric: true
     };
 
-    onSave(finalProduct, numQty, saveToCatalog);
+    onSave(finalProduct, numQty, isAdmin && saveToCatalog);
   };
 
   const handleKeyDown = (e) => {
@@ -252,23 +253,29 @@ export default function GenericProductModal({
             </div>
           </div>
 
-          {/* Checkbox */}
-          <label className="flex items-center gap-2.5 p-3 rounded-xl bg-slate-50 border border-slate-200 cursor-pointer text-xs text-slate-700 hover:bg-slate-100 transition-colors">
-            <input
-              type="checkbox"
-              checked={saveToCatalog}
-              onChange={(e) => setSaveToCatalog(e.target.checked)}
-              className="w-4 h-4 rounded text-slate-800 focus:ring-slate-500 border-slate-300"
-            />
-            <div>
-              <span className="font-semibold text-slate-900 block">
-                Guardar también en el catálogo permanente
-              </span>
-              <span className="text-slate-500 text-[11px]">
-                Permite reconocer este código si vuelves a escanearlo más adelante.
-              </span>
+          {/* Checkbox (Admin Only) vs Session Notice (Collaborator/Auditor) */}
+          {isAdmin ? (
+            <label className="flex items-center gap-2.5 p-3 rounded-xl bg-slate-50 border border-slate-200 cursor-pointer text-xs text-slate-700 hover:bg-slate-100 transition-colors">
+              <input
+                type="checkbox"
+                checked={saveToCatalog}
+                onChange={(e) => setSaveToCatalog(e.target.checked)}
+                className="w-4 h-4 rounded text-slate-800 focus:ring-slate-500 border-slate-300"
+              />
+              <div>
+                <span className="font-semibold text-slate-900 block">
+                  Guardar también en el catálogo permanente de la base de datos (Administrador)
+                </span>
+                <span className="text-slate-500 text-[11px]">
+                  Permite reconocer este código de forma global si vuelves a escanearlo más adelante.
+                </span>
+              </div>
+            </label>
+          ) : (
+            <div className="p-3 rounded-xl bg-amber-50/80 border border-amber-200/80 text-xs text-amber-900 flex items-start gap-2">
+              <span>🔒 <strong>Modo Sesión:</strong> Este producto se agregará a tu conteo activo. Solo el Administrador puede registrar productos permanentes en la base de datos principal.</span>
             </div>
-          </label>
+          )}
 
           {/* Action Buttons */}
           <div className="flex items-center gap-3 pt-2">
