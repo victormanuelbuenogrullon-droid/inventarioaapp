@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import Papa from 'papaparse';
-import { UploadCloud, CheckCircle2, AlertTriangle, X, FileText, Loader2 } from 'lucide-react';
-import { saveProductsInBatches } from '../utils/db';
+import { UploadCloud, CheckCircle2, AlertTriangle, X, FileText, Loader2, RefreshCw, PlusCircle, Database } from 'lucide-react';
+import { saveProductsInBatches, upsertProductsInBatches } from '../utils/db';
 import { uploadCatalogToServer } from '../utils/socket';
 
 export default function CsvUploaderModal({ isOpen, onClose, onImportSuccess, currentCount }) {
@@ -65,9 +65,9 @@ export default function CsvUploaderModal({ isOpen, onClose, onImportSuccess, cur
             throw new Error('No se encontraron productos válidos en el archivo.');
           }
 
-          setProgress({ current: 0, total: formattedProducts.length, text: 'Guardando en base de datos local...' });
+          setProgress({ current: 0, total: formattedProducts.length, text: 'Fusionando catálogo por código de barra...' });
 
-          await saveProductsInBatches(formattedProducts, (current, total) => {
+          const localResult = await upsertProductsInBatches(formattedProducts, (current, total) => {
             setProgress({
               current,
               total,
@@ -75,21 +75,28 @@ export default function CsvUploaderModal({ isOpen, onClose, onImportSuccess, cur
             });
           });
 
-          setProgress({ current: formattedProducts.length, total: formattedProducts.length, text: 'Sincronizando catálogo con el servidor para todos los usuarios...' });
+          setProgress({ current: formattedProducts.length, total: formattedProducts.length, text: 'Sincronizando con el servidor central para todos los usuarios...' });
 
+          let serverResult = null;
           try {
-            await uploadCatalogToServer(formattedProducts);
+            serverResult = await uploadCatalogToServer(formattedProducts);
           } catch (uploadErr) {
             console.warn('Advertencia al sincronizar catálogo con servidor:', uploadErr);
           }
 
+          const finalTotal = serverResult?.total || localResult.total;
+          const finalUpdated = serverResult?.updated ?? localResult.updated;
+          const finalCreated = serverResult?.created ?? localResult.created;
+
           setSuccessInfo({
-            total: formattedProducts.length,
+            total: finalTotal,
+            updated: finalUpdated,
+            created: finalCreated,
             fileName: file.name
           });
 
           if (onImportSuccess) {
-            onImportSuccess(formattedProducts.length);
+            onImportSuccess(finalTotal);
           }
 
         } catch (err) {
@@ -197,8 +204,8 @@ export default function CsvUploaderModal({ isOpen, onClose, onImportSuccess, cur
               <h4 className="text-sm font-bold text-slate-900 mb-1">
                 Haz clic para seleccionar o arrastra aquí tu CSV
               </h4>
-              <p className="text-xs text-slate-500 max-w-xs mx-auto">
-                Soporta archivos exportados de MariaDB (como <code className="text-slate-800 font-semibold">actual_mariadb.csv</code>).
+              <p className="text-xs text-slate-500 max-w-sm mx-auto leading-relaxed">
+                <strong>Actualización Inteligente por Código de Barra:</strong> Los artículos existentes actualizarán su costo, precio y descripción. Los artículos nuevos se crearán automáticamente.
               </p>
 
               <div className="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 text-white text-xs font-semibold shadow-xs">
@@ -232,17 +239,51 @@ export default function CsvUploaderModal({ isOpen, onClose, onImportSuccess, cur
 
           {/* Success state */}
           {successInfo && (
-            <div className="p-6 rounded-2xl bg-slate-50 border border-slate-200 text-center space-y-3">
+            <div className="p-6 rounded-2xl bg-slate-50 border border-slate-200 text-center space-y-4 animate-in zoom-in-95 duration-150">
               <CheckCircle2 className="w-10 h-10 text-emerald-600 mx-auto" />
               <div>
-                <h4 className="text-base font-bold text-slate-900">¡Base de datos cargada con éxito!</h4>
-                <p className="text-xs text-slate-600 mt-1">
-                  Se indexaron <strong className="text-slate-900 font-bold">{successInfo.total.toLocaleString()}</strong> productos listos para usar.
+                <h4 className="text-base font-bold text-slate-900">¡Catálogo procesado y actualizado con éxito!</h4>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Archivo procesado: <strong className="text-slate-700">{successInfo.fileName}</strong>
                 </p>
               </div>
+
+              {/* Stats Breakdown Badges */}
+              <div className="grid grid-cols-3 gap-2.5 max-w-md mx-auto text-center pt-1">
+                <div className="p-2.5 rounded-xl bg-indigo-50 border border-indigo-100">
+                  <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider block">
+                    Actualizados
+                  </span>
+                  <span className="text-lg font-black text-indigo-900">
+                    {successInfo.updated.toLocaleString()}
+                  </span>
+                  <span className="text-[9px] text-indigo-500 block leading-tight">Mismo código barra</span>
+                </div>
+
+                <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-100">
+                  <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider block">
+                    Nuevos Creados
+                  </span>
+                  <span className="text-lg font-black text-emerald-900">
+                    {successInfo.created.toLocaleString()}
+                  </span>
+                  <span className="text-[9px] text-emerald-500 block leading-tight">No existían</span>
+                </div>
+
+                <div className="p-2.5 rounded-xl bg-slate-100 border border-slate-200">
+                  <span className="text-[10px] font-bold text-slate-600 uppercase tracking-wider block">
+                    Total Catálogo
+                  </span>
+                  <span className="text-lg font-black text-slate-900">
+                    {successInfo.total.toLocaleString()}
+                  </span>
+                  <span className="text-[9px] text-slate-500 block leading-tight">En base de datos</span>
+                </div>
+              </div>
+
               <button
                 onClick={onClose}
-                className="mt-2 px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs shadow-sm transition-all"
+                className="mt-2 px-6 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs shadow-sm transition-all"
               >
                 Comenzar Pase de Inventario
               </button>

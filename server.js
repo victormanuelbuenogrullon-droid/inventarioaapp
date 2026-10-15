@@ -903,23 +903,106 @@ app.get('/api/catalog/meta', (req, res) => {
   });
 });
 
-// Upload entire catalog from a client (e.g. User uploads CSV) - ADMIN ONLY
+// Upload & Upsert catalog from a client (e.g. User uploads CSV) - ADMIN ONLY
+// Matches strictly by barcode (codigoInternacional): updates matching items, creates new ones
 app.post('/api/catalog/upload', requireAdmin, (req, res) => {
   const { products } = req.body;
-  if (Array.isArray(products) && products.length > 0) {
-    sharedCatalog = products;
-    persistCatalogToDisk();
-    
-    // Broadcast to all connected clients that a new catalog is available
-    io.emit('catalog:updated', {
-      totalProducts: sharedCatalog.length,
-      updatedAt: new Date().toISOString()
-    });
-
-    console.log(`[Catalog] Catálogo actualizado por administrador (${req.user.username}): ${products.length} productos.`);
-    return res.json({ success: true, total: products.length });
+  if (!Array.isArray(products) || products.length === 0) {
+    return res.status(400).json({ error: 'Formato de productos inválido o archivo vacío' });
   }
-  res.status(400).json({ error: 'Formato de productos inválido' });
+
+  let updatedCount = 0;
+  let createdCount = 0;
+
+  // Helper to extract clean barcode
+  const getBarcode = (item) => {
+    if (!item) return '';
+    const bar = item.codigoInternacional || item.codigoBarra || '';
+    return String(bar).trim().toLowerCase();
+  };
+
+  // Build index of existing items in sharedCatalog strictly by Barcode
+  const barcodeMap = new Map();
+  sharedCatalog.forEach((item, index) => {
+    const bar = getBarcode(item);
+    if (bar && !barcodeMap.has(bar)) {
+      barcodeMap.set(bar, index);
+    }
+  });
+
+  products.forEach((incoming) => {
+    const incomingBar = getBarcode(incoming);
+
+    if (incomingBar && barcodeMap.has(incomingBar)) {
+      // 1. UPDATE EXISTING ITEM (matches strictly by barcode)
+      const idx = barcodeMap.get(incomingBar);
+      const existing = sharedCatalog[idx];
+
+      sharedCatalog[idx] = {
+        ...existing,
+        codigo: incoming.codigo || existing.codigo,
+        codigoInterno: incoming.codigoInterno || existing.codigoInterno,
+        codigoInternacional: incoming.codigoInternacional || existing.codigoInternacional,
+        descripcion: incoming.descripcion || existing.descripcion,
+        marca: incoming.marca || existing.marca || '',
+        modelo: incoming.modelo || existing.modelo || '',
+        unidad: incoming.unidad || existing.unidad || 'UNIDAD',
+        categoria: incoming.categoria || existing.categoria || '',
+        departamento: incoming.departamento || existing.departamento || '',
+        costo: (incoming.costo !== undefined && incoming.costo !== null && !isNaN(incoming.costo))
+          ? Number(incoming.costo)
+          : (Number(existing.costo) || 0),
+        precio: (incoming.precio !== undefined && incoming.precio !== null && !isNaN(incoming.precio))
+          ? Number(incoming.precio)
+          : (Number(existing.precio) || 0),
+        existencia: incoming.existencia !== undefined ? Number(incoming.existencia) : (existing.existencia || 0),
+        lastUpdated: new Date().toISOString()
+      };
+      updatedCount++;
+    } else {
+      // 2. CREATE NEW PRODUCT (new barcode or uncataloged)
+      const newProduct = {
+        id: incoming.id || `p_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        codigo: incoming.codigo || '',
+        codigoInterno: incoming.codigoInterno || '',
+        codigoInternacional: incoming.codigoInternacional || '',
+        descripcion: incoming.descripcion || 'Sin descripción',
+        marca: incoming.marca || '',
+        modelo: incoming.modelo || '',
+        unidad: incoming.unidad || 'UNIDAD',
+        categoria: incoming.categoria || '',
+        departamento: incoming.departamento || '',
+        costo: Number(incoming.costo) || 0,
+        precio: Number(incoming.precio) || 0,
+        existencia: Number(incoming.existencia) || 0,
+        createdAt: new Date().toISOString()
+      };
+      sharedCatalog.push(newProduct);
+      if (incomingBar) {
+        barcodeMap.set(incomingBar, sharedCatalog.length - 1);
+      }
+      createdCount++;
+    }
+  });
+
+  persistCatalogToDisk();
+  
+  // Broadcast to all connected clients that a new merged catalog is available
+  io.emit('catalog:updated', {
+    totalProducts: sharedCatalog.length,
+    updatedCount,
+    createdCount,
+    updatedAt: new Date().toISOString()
+  });
+
+  console.log(`[Catalog] Catálogo actualizado por administrador (${req.user.username}): ${updatedCount} actualizados por código de barra, ${createdCount} nuevos creados. Total catálogo: ${sharedCatalog.length}`);
+  
+  return res.json({
+    success: true,
+    total: sharedCatalog.length,
+    updated: updatedCount,
+    created: createdCount
+  });
 });
 
 // Get entire shared history logs

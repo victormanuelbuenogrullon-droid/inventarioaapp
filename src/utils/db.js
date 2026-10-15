@@ -202,6 +202,96 @@ export async function saveProductsInBatches(products, onProgress) {
 }
 
 /**
+ * Upsert products into IndexedDB matching strictly by Barcode (codigoInternacional).
+ * Updates matching items, inserts new items, preserves items not in the list.
+ */
+export async function upsertProductsInBatches(incomingProducts, onProgress) {
+  const existingProducts = await getAllProductsFromDB();
+
+  let updatedCount = 0;
+  let createdCount = 0;
+
+  const getBarcode = (item) => {
+    if (!item) return '';
+    const bar = item.codigoInternacional || item.codigoBarra || '';
+    return String(bar).trim().toLowerCase();
+  };
+
+  const barcodeMap = new Map();
+  const mergedCatalog = [...existingProducts];
+
+  mergedCatalog.forEach((item, index) => {
+    const bar = getBarcode(item);
+    if (bar && !barcodeMap.has(bar)) {
+      barcodeMap.set(bar, index);
+    }
+  });
+
+  incomingProducts.forEach((incoming) => {
+    const incomingBar = getBarcode(incoming);
+
+    if (incomingBar && barcodeMap.has(incomingBar)) {
+      // 1. UPDATE EXISTING (strictly by barcode)
+      const idx = barcodeMap.get(incomingBar);
+      const existing = mergedCatalog[idx];
+
+      mergedCatalog[idx] = {
+        ...existing,
+        codigo: incoming.codigo || existing.codigo,
+        codigoInterno: incoming.codigoInterno || existing.codigoInterno,
+        codigoInternacional: incoming.codigoInternacional || existing.codigoInternacional,
+        descripcion: incoming.descripcion || existing.descripcion,
+        marca: incoming.marca || existing.marca || '',
+        modelo: incoming.modelo || existing.modelo || '',
+        unidad: incoming.unidad || existing.unidad || 'UNIDAD',
+        categoria: incoming.categoria || existing.categoria || '',
+        departamento: incoming.departamento || existing.departamento || '',
+        costo: (incoming.costo !== undefined && incoming.costo !== null && !isNaN(incoming.costo))
+          ? Number(incoming.costo)
+          : (Number(existing.costo) || 0),
+        precio: (incoming.precio !== undefined && incoming.precio !== null && !isNaN(incoming.precio))
+          ? Number(incoming.precio)
+          : (Number(existing.precio) || 0),
+        existencia: incoming.existencia !== undefined ? Number(incoming.existencia) : (existing.existencia || 0)
+      };
+      updatedCount++;
+    } else {
+      // 2. CREATE NEW
+      const newProduct = {
+        id: incoming.id || `p_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        codigo: incoming.codigo || '',
+        codigoInterno: incoming.codigoInterno || '',
+        codigoInternacional: incoming.codigoInternacional || '',
+        descripcion: incoming.descripcion || 'Sin descripción',
+        marca: incoming.marca || '',
+        modelo: incoming.modelo || '',
+        unidad: incoming.unidad || 'UNIDAD',
+        categoria: incoming.categoria || '',
+        departamento: incoming.departamento || '',
+        costo: Number(incoming.costo) || 0,
+        precio: Number(incoming.precio) || 0,
+        existencia: Number(incoming.existencia) || 0
+      };
+      mergedCatalog.push(newProduct);
+      if (incomingBar) {
+        barcodeMap.set(incomingBar, mergedCatalog.length - 1);
+      }
+      createdCount++;
+    }
+  });
+
+  // Save full merged catalog to IndexedDB and refresh RAM search maps
+  await saveProductsInBatches(mergedCatalog, onProgress);
+
+  return {
+    total: mergedCatalog.length,
+    updated: updatedCount,
+    created: createdCount,
+    mergedProducts: mergedCatalog
+  };
+}
+
+/**
  * Find a product by Barcode, SKU, or Internal Code in O(1) time (< 0.1ms)
  */
 export async function findProduct(query) {
