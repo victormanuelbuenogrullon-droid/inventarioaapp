@@ -20,7 +20,7 @@ import HistoryLogView from './components/HistoryLogView';
 import LoginView from './components/LoginView';
 import UserManagementModal from './components/UserManagementModal';
 import SessionSelectorModal from './components/SessionSelectorModal';
-import { getStoredToken, getStoredUser, fetchCurrentUser, clearAuthSession } from './utils/auth';
+import { getStoredToken, getStoredUser, fetchCurrentUser, clearAuthSession, saveAuthSession } from './utils/auth';
 import { getCatalogCount, saveProductsInBatches, saveSingleProduct, updateProductInDB, initMemoryCache, getAllProductsFromDB } from './utils/db';
 import { exportToExcel } from './utils/export';
 import { 
