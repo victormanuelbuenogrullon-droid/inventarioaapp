@@ -9,13 +9,16 @@ import {
   ShieldCheck, 
   AlertCircle,
   Hash,
-  Users
+  Users,
+  CreditCard
 } from 'lucide-react';
 import { loginUser, saveAuthSession } from '../utils/auth';
 import { collaboratorLoginApi } from '../utils/socket';
+import RequestAccessModal from './RequestAccessModal';
 
 export default function LoginView({ onLoginSuccess }) {
   const [loginMode, setLoginMode] = useState('user'); // 'user' | 'collaborator'
+  const [isRequestAccessOpen, setIsRequestAccessOpen] = useState(false);
   
   // Standard user form state
   const [username, setUsername] = useState('');
@@ -172,7 +175,7 @@ export default function LoginView({ onLoginSuccess }) {
                     type="text"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
-                    placeholder="admin o tu usuario"
+                    placeholder="Usuario"
                     autoFocus
                     autoComplete="username"
                     required
@@ -194,7 +197,7 @@ export default function LoginView({ onLoginSuccess }) {
                     type={showPassword ? 'text' : 'password'}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••"
+                    placeholder="Contraseña"
                     autoComplete="current-password"
                     required
                     className="w-full pl-10 pr-10 py-2.5 bg-slate-50 hover:bg-slate-50/80 focus:bg-white border border-slate-200 rounded-xl text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all"
@@ -225,7 +228,7 @@ export default function LoginView({ onLoginSuccess }) {
                     type="text"
                     value={sessionCode}
                     onChange={(e) => setSessionCode(e.target.value.toUpperCase())}
-                    placeholder="ej. INV-8492"
+                    placeholder="Código de sesión (opcional)"
                     className="w-full pl-10 pr-3.5 py-2.5 bg-slate-50 hover:bg-slate-50/80 focus:bg-white border border-slate-200 rounded-xl text-sm font-mono uppercase text-indigo-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all"
                   />
                 </div>
@@ -269,7 +272,7 @@ export default function LoginView({ onLoginSuccess }) {
                     type="text"
                     value={collabCode}
                     onChange={(e) => setCollabCode(e.target.value.toUpperCase())}
-                    placeholder="ej. INV-8492"
+                    placeholder="Código de sesión"
                     autoFocus
                     required
                     className="w-full pl-10 pr-3.5 py-2.5 bg-slate-50 hover:bg-slate-50/80 focus:bg-white border border-slate-200 rounded-xl text-sm font-mono font-bold uppercase text-emerald-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all tracking-wider"
@@ -293,7 +296,7 @@ export default function LoginView({ onLoginSuccess }) {
                     type="text"
                     value={collabName}
                     onChange={(e) => setCollabName(e.target.value)}
-                    placeholder="ej. Pedro Sánchez / Estación 2"
+                    placeholder="Nombre o estación"
                     required
                     className="w-full pl-10 pr-3.5 py-2.5 bg-slate-50 hover:bg-slate-50/80 focus:bg-white border border-slate-200 rounded-xl text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all"
                   />
@@ -318,6 +321,21 @@ export default function LoginView({ onLoginSuccess }) {
             </form>
           )}
 
+          {/* Request Access Button */}
+          <div className="mt-5 pt-4 border-t border-slate-100 text-center">
+            <p className="text-xs text-slate-500 mb-2 font-medium">
+              ¿No tienes una cuenta de acceso o deseas renovar?
+            </p>
+            <button
+              type="button"
+              onClick={() => setIsRequestAccessOpen(true)}
+              className="w-full py-2.5 px-4 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0"
+            >
+              <CreditCard className="w-4 h-4 text-indigo-400" />
+              <span>Solicitar Acceso y Consultar Tarifas</span>
+            </button>
+          </div>
+
         </div>
 
         {/* Footer info */}
@@ -326,6 +344,12 @@ export default function LoginView({ onLoginSuccess }) {
         </p>
 
       </div>
+
+      {/* Request Access Modal */}
+      <RequestAccessModal 
+        isOpen={isRequestAccessOpen} 
+        onClose={() => setIsRequestAccessOpen(false)} 
+      />
     </div>
   );
 }

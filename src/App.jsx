@@ -20,6 +20,9 @@ import HistoryLogView from './components/HistoryLogView';
 import LoginView from './components/LoginView';
 import UserManagementModal from './components/UserManagementModal';
 import SessionSelectorModal from './components/SessionSelectorModal';
+import PaymentConfigModal from './components/PaymentConfigModal';
+import AccessRequestsModal from './components/AccessRequestsModal';
+import { fetchAdminAccessRequests } from './utils/payment';
 import { getStoredToken, getStoredUser, fetchCurrentUser, clearAuthSession, saveAuthSession } from './utils/auth';
 import { getCatalogCount, saveProductsInBatches, saveSingleProduct, updateProductInDB, initMemoryCache, getAllProductsFromDB } from './utils/db';
 import { exportToExcel } from './utils/export';
@@ -59,6 +62,9 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState(() => getStoredUser());
   const [isAuthChecking, setIsAuthChecking] = useState(true);
   const [isUserManagementOpen, setIsUserManagementOpen] = useState(false);
+  const [isPaymentConfigOpen, setIsPaymentConfigOpen] = useState(false);
+  const [isAccessRequestsOpen, setIsAccessRequestsOpen] = useState(false);
+  const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
 
   // Active Multi-User Session State
   const [activeSession, setActiveSession] = useState(() => {
@@ -127,6 +133,50 @@ export default function App() {
       }
     }
   }, [activeSession, currentUserName]);
+
+  // Sync pending access requests for admin users
+  useEffect(() => {
+    if (currentUser?.role === 'admin') {
+      const syncPendingRequests = async () => {
+        try {
+          const reqs = await fetchAdminAccessRequests();
+          if (Array.isArray(reqs)) {
+            setPendingRequestsCount(reqs.filter((r) => r.status === 'pending').length);
+          }
+        } catch (e) {
+          // silent
+        }
+      };
+
+      syncPendingRequests();
+
+      const socket = getSocket();
+      const handleNewRequest = (data) => {
+        setPendingRequestsCount((prev) => prev + 1);
+        setLastScannedMessage({
+          type: 'info',
+          text: `📩 ¡Nueva solicitud de acceso recibida de ${data.email} (${data.daysRequested} días)!`,
+          time: new Date().toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+        });
+      };
+
+      const handleUpdatedRequest = () => {
+        syncPendingRequests();
+      };
+
+      socket.on('access-request:new', handleNewRequest);
+      socket.on('access-request:updated', handleUpdatedRequest);
+      socket.on('access-request:deleted', handleUpdatedRequest);
+
+      return () => {
+        socket.off('access-request:new', handleNewRequest);
+        socket.off('access-request:updated', handleUpdatedRequest);
+        socket.off('access-request:deleted', handleUpdatedRequest);
+      };
+    } else {
+      setPendingRequestsCount(0);
+    }
+  }, [currentUser]);
 
   // Main State
   const [catalogCount, setCatalogCount] = useState(0);
@@ -960,6 +1010,9 @@ export default function App() {
           if (!isCollaborator) setIsSessionSelectorOpen(true);
         }}
         onOpenUserManagement={() => setIsUserManagementOpen(true)}
+        onOpenPaymentConfig={() => setIsPaymentConfigOpen(true)}
+        onOpenAccessRequests={() => setIsAccessRequestsOpen(true)}
+        pendingRequestsCount={pendingRequestsCount}
         onLogout={handleLogout}
       />
 
@@ -1245,6 +1298,29 @@ export default function App() {
         onClose={() => setIsUserManagementOpen(false)}
         currentUserId={currentUser?.id}
       />
+
+      {/* Admin Payment & Pricing Configuration Modal */}
+      {currentUser?.role === 'admin' && (
+        <PaymentConfigModal
+          isOpen={isPaymentConfigOpen}
+          onClose={() => setIsPaymentConfigOpen(false)}
+        />
+      )}
+
+      {/* Admin Access Requests & Vouchers Review Modal */}
+      {currentUser?.role === 'admin' && (
+        <AccessRequestsModal
+          isOpen={isAccessRequestsOpen}
+          onClose={() => setIsAccessRequestsOpen(false)}
+          onUserCreated={() => {
+            fetchAdminAccessRequests().then((reqs) => {
+              if (Array.isArray(reqs)) {
+                setPendingRequestsCount(reqs.filter((r) => r.status === 'pending').length);
+              }
+            }).catch(() => {});
+          }}
+        />
+      )}
 
       {/* Catalog Syncing Toast Indicator */}
       {isCatalogSyncing && (

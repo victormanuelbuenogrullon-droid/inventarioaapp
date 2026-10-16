@@ -19,7 +19,9 @@ import {
   Copy,
   Check,
   ListOrdered,
-  Menu
+  Menu,
+  CreditCard,
+  DollarSign
 } from 'lucide-react';
 
 export default function Navbar({
@@ -46,6 +48,9 @@ export default function Navbar({
   activeSession,
   onOpenSessionSelector,
   onOpenUserManagement,
+  onOpenPaymentConfig,
+  onOpenAccessRequests,
+  pendingRequestsCount = 0,
   onLogout
 }) {
   const [codeCopied, setCodeCopied] = useState(false);
@@ -266,6 +271,12 @@ export default function Navbar({
               <span className="font-bold text-slate-800 hidden sm:inline">
                 Menú
               </span>
+              {pendingRequestsCount > 0 && currentUser?.role === 'admin' && (
+                <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500"></span>
+                </span>
+              )}
               <Menu className={`w-4 h-4 ${isMenuOpen ? 'text-white' : 'text-slate-600'}`} />
             </button>
 
@@ -322,6 +333,56 @@ export default function Navbar({
                   <div className="px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
                     Administración y Catálogo
                   </div>
+
+                  {/* Access Requests - Admin Only */}
+                  {currentUser?.role === 'admin' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsMenuOpen(false);
+                        onOpenAccessRequests?.();
+                      }}
+                      className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left hover:bg-slate-50 transition-colors group"
+                    >
+                      <div className="w-7 h-7 rounded-lg bg-amber-50 border border-amber-100 flex items-center justify-center text-amber-600 shrink-0 group-hover:bg-amber-600 group-hover:text-white transition-colors relative">
+                        <CreditCard className="w-3.5 h-3.5" />
+                        {pendingRequestsCount > 0 && (
+                          <span className="w-2 h-2 rounded-full bg-rose-500 absolute -top-0.5 -right-0.5 ring-2 ring-white" />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-slate-800">Solicitudes de Acceso</span>
+                          {pendingRequestsCount > 0 && (
+                            <span className="px-1.5 py-0.5 rounded-full bg-amber-500 text-white text-[9px] font-black">
+                              {pendingRequestsCount} nueva{pendingRequestsCount > 1 ? 's' : ''}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[10px] text-slate-400">Ver comprobantes y activar cuentas</div>
+                      </div>
+                    </button>
+                  )}
+
+                  {/* Payment & Pricing Configuration - Admin Only */}
+                  {currentUser?.role === 'admin' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsMenuOpen(false);
+                        onOpenPaymentConfig?.();
+                      }}
+                      className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left hover:bg-slate-50 transition-colors group"
+                    >
+                      <div className="w-7 h-7 rounded-lg bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 shrink-0 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+                        <DollarSign className="w-3.5 h-3.5" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs font-bold text-slate-800">Ajustes de Pago y Tarifas</div>
+                        <div className="text-[10px] text-slate-400">Tarifa por día, bancos y correo</div>
+                      </div>
+                    </button>
+                  )}
 
                   {/* Import Catalog (CSV / Excel) - Admin Only */}
                   {currentUser?.role === 'admin' && (

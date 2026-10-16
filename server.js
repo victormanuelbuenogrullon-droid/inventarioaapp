@@ -8,6 +8,7 @@ import os from 'os';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
+import nodemailer from 'nodemailer';
 import {
   initDatabaseTables,
   isDbConnected,
@@ -22,7 +23,13 @@ import {
   dbLoadCatalog,
   dbSaveCatalog,
   dbLoadSettings,
-  dbSaveSettings
+  dbSaveSettings,
+  dbLoadAccessRequests,
+  dbSaveAccessRequest,
+  dbUpdateAccessRequest,
+  dbDeleteAccessRequest,
+  dbLoadPaymentConfig,
+  dbSavePaymentConfig
 } from './database.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -132,6 +139,34 @@ const STATE_FILE = path.join(DATA_DIR, 'inventory_state.json');
 const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
 const CATALOG_FILE = path.join(DATA_DIR, 'catalog.json');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
+const PAYMENT_CONFIG_FILE = path.join(DATA_DIR, 'payment_config.json');
+const ACCESS_REQUESTS_FILE = path.join(DATA_DIR, 'access_requests.json');
+
+const DEFAULT_PAYMENT_CONFIG = {
+  pricePerDay: 5.0,
+  currency: 'USD',
+  currencySymbol: '$',
+  adminNotificationEmail: process.env.ADMIN_EMAIL || '',
+  bankName: 'Banco Nacional / Transferencia / Zelle',
+  accountType: 'Cuenta Corriente',
+  accountNumber: '0102-0000-00-0000000000',
+  accountHolder: 'InventariosApp',
+  idNumber: 'J-12345678-0',
+  phone: '+1 (555) 123-4567',
+  paymentEmail: 'pagos@inventariosapp.com',
+  instructions: 'Por favor realiza el pago o transferencia por el monto exacto calculado para los días solicitados. Luego sube tu comprobante (captura o PDF) para que el Administrador procese tu acceso.',
+  smtpConfig: {
+    host: process.env.SMTP_HOST || '',
+    port: process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : 587,
+    secure: process.env.SMTP_SECURE === 'true',
+    user: process.env.SMTP_USER || '',
+    pass: process.env.SMTP_PASS || '',
+    from: process.env.SMTP_FROM || ''
+  }
+};
+
+let sharedPaymentConfig = { ...DEFAULT_PAYMENT_CONFIG };
+let sharedAccessRequests = [];
 
 // Sessions store: Record<sessionCode, SessionObject>
 let sharedSessions = {};
@@ -338,6 +373,191 @@ function loadUsersFromDisk() {
     }
   } catch (err) {
     console.error('[Auth] Error al inicializar usuarios desde disco:', err);
+  }
+}
+
+function persistPaymentConfigToDisk() {
+  try {
+    fs.writeFileSync(PAYMENT_CONFIG_FILE, JSON.stringify(sharedPaymentConfig, null, 2), 'utf-8');
+  } catch (e) {
+    console.error('[Payment] Error guardando config en disco:', e);
+  }
+}
+
+function loadPaymentConfigFromDisk() {
+  try {
+    if (fs.existsSync(PAYMENT_CONFIG_FILE)) {
+      const raw = fs.readFileSync(PAYMENT_CONFIG_FILE, 'utf-8');
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        sharedPaymentConfig = { ...DEFAULT_PAYMENT_CONFIG, ...parsed };
+      }
+    }
+  } catch (err) {
+    console.error('[Payment] Error cargando config desde disco:', err);
+  }
+}
+
+function persistAccessRequestsToDisk() {
+  try {
+    fs.writeFileSync(ACCESS_REQUESTS_FILE, JSON.stringify(sharedAccessRequests, null, 2), 'utf-8');
+  } catch (e) {
+    console.error('[AccessRequests] Error guardando solicitudes en disco:', e);
+  }
+}
+
+function loadAccessRequestsFromDisk() {
+  try {
+    if (fs.existsSync(ACCESS_REQUESTS_FILE)) {
+      const raw = fs.readFileSync(ACCESS_REQUESTS_FILE, 'utf-8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        sharedAccessRequests = parsed;
+      }
+    }
+  } catch (err) {
+    console.error('[AccessRequests] Error cargando solicitudes desde disco:', err);
+  }
+}
+
+function createTransporter(customSmtp) {
+  const smtp = customSmtp || sharedPaymentConfig.smtpConfig || {};
+  const host = smtp.host || process.env.SMTP_HOST;
+  const user = smtp.user || process.env.SMTP_USER;
+  const pass = smtp.pass || process.env.SMTP_PASS;
+  const port = smtp.port ? Number(smtp.port) : (process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : 587);
+  const secure = smtp.secure !== undefined ? smtp.secure : (process.env.SMTP_SECURE === 'true');
+
+  if (!host || !user || !pass) {
+    return null;
+  }
+
+  return nodemailer.createTransport({
+    host,
+    port,
+    secure: port === 465 || secure,
+    auth: { user, pass }
+  });
+}
+
+async function sendAccessRequestEmailToAdmin(request) {
+  const adminEmail = sharedPaymentConfig.adminNotificationEmail || process.env.ADMIN_EMAIL;
+  if (!adminEmail) {
+    console.log('[Email] No hay correo de administrador configurado para notificaciones.');
+    return false;
+  }
+
+  const transporter = createTransporter();
+  if (!transporter) {
+    console.log('[Email] Servidor SMTP no configurado. La solicitud se visualiza en el panel de administrador.');
+    return false;
+  }
+
+  try {
+    const fromAddress = sharedPaymentConfig.smtpConfig?.from || process.env.SMTP_FROM || sharedPaymentConfig.smtpConfig?.user || process.env.SMTP_USER;
+    const attachments = [];
+    if (request.voucherData && request.voucherFilename) {
+      const parts = request.voucherData.split(',');
+      const base64Content = parts.length > 1 ? parts[1] : parts[0];
+      attachments.push({
+        filename: request.voucherFilename,
+        content: Buffer.from(base64Content, 'base64'),
+        contentType: request.voucherMimetype || 'application/octet-stream'
+      });
+    }
+
+    const currSym = sharedPaymentConfig.currencySymbol || '$';
+    const html = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 14px; background-color: #ffffff;">
+        <div style="background-color: #4f46e5; padding: 16px; border-radius: 10px; margin-bottom: 20px; text-align: center;">
+          <h2 style="color: #ffffff; margin: 0; font-size: 20px;">📩 Nueva Solicitud de Acceso</h2>
+          <p style="color: #e0e7ff; margin: 4px 0 0 0; font-size: 13px;">InventariosApp Sistema Colaborativo</p>
+        </div>
+        <p style="font-size: 14px; color: #334155;">Has recibido una nueva solicitud de acceso a la plataforma con comprobante de pago adjunto:</p>
+        
+        <table style="width: 100%; border-collapse: collapse; font-size: 14px; margin: 16px 0;">
+          <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 0; color: #64748b;"><strong>Solicitante:</strong></td><td style="padding: 8px 0; color: #0f172a;">${request.name || 'No especificado'}</td></tr>
+          <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 0; color: #64748b;"><strong>Correo:</strong></td><td style="padding: 8px 0; color: #0f172a;"><a href="mailto:${request.email}" style="color: #4f46e5;">${request.email}</a></td></tr>
+          <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 0; color: #64748b;"><strong>Teléfono / WhatsApp:</strong></td><td style="padding: 8px 0; color: #0f172a;">${request.phone || 'No especificado'}</td></tr>
+          <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 0; color: #64748b;"><strong>Días Solicitados:</strong></td><td style="padding: 8px 0; color: #0f172a; font-weight: bold;">${request.daysRequested} días</td></tr>
+          <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 0; color: #64748b;"><strong>Tarifa por Día:</strong></td><td style="padding: 8px 0; color: #0f172a;">${currSym}${request.pricePerDay} ${request.currency}</td></tr>
+          <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 0; color: #64748b;"><strong>Monto Pagado:</strong></td><td style="padding: 8px 0; color: #16a34a; font-weight: bold; font-size: 16px;">${currSym}${request.totalAmount} ${request.currency}</td></tr>
+          ${request.notes ? `<tr><td style="padding: 8px 0; color: #64748b;"><strong>Notas del Solicitante:</strong></td><td style="padding: 8px 0; color: #0f172a;">${request.notes}</td></tr>` : ''}
+        </table>
+
+        <div style="background-color: #f8fafc; padding: 14px; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 13px; color: #475569; margin-top: 15px;">
+          📎 El archivo de comprobante fue adjuntado a este correo. Puedes ingresar a la app en el menú <strong>"Solicitudes de Acceso"</strong> para autorizar la cuenta y generar la clave con un solo clic.
+        </div>
+      </div>
+    `;
+
+    await transporter.sendMail({
+      from: `"InventariosApp" <${fromAddress}>`,
+      to: adminEmail,
+      subject: `Nueva Solicitud de Acceso: ${request.name || request.email} (${request.daysRequested} días - ${currSym}${request.totalAmount})`,
+      html,
+      attachments
+    });
+    console.log(`[Email] Notificación de solicitud enviada a administrador (${adminEmail}).`);
+    return true;
+  } catch (err) {
+    console.error('[Email] Error enviando correo al administrador:', err);
+    return false;
+  }
+}
+
+async function sendCredentialsEmailToUser(userEmail, credentials, daysRequested, expiresAt) {
+  const transporter = createTransporter();
+  if (!transporter) {
+    console.log('[Email] Servidor SMTP no configurado. Credenciales disponibles en pantalla de admin.');
+    return false;
+  }
+
+  try {
+    const fromAddress = sharedPaymentConfig.smtpConfig?.from || process.env.SMTP_FROM || sharedPaymentConfig.smtpConfig?.user || process.env.SMTP_USER;
+    const expDateStr = expiresAt ? new Date(expiresAt).toLocaleDateString('es-DO', { day: '2-digit', month: '2-digit', year: 'numeric' }) : 'Acceso permanente';
+    const appUrl = sharedTunnelUrl || 'https://inventariosapp.onrender.com';
+
+    const html = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 14px; background-color: #ffffff;">
+        <div style="background-color: #10b981; padding: 16px; border-radius: 10px; margin-bottom: 20px; text-align: center;">
+          <h2 style="color: #ffffff; margin: 0; font-size: 20px;">🎉 ¡Tu Acceso a InventariosApp ha sido Aprobado!</h2>
+        </div>
+        <p style="font-size: 14px; color: #334155;">Hola,</p>
+        <p style="font-size: 14px; color: #334155;">Tu pago y comprobante han sido validados exitosamente por el administrador. A continuación encontrarás tus credenciales de inicio de sesión:</p>
+        
+        <div style="background-color: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 10px; padding: 18px; margin: 20px 0;">
+          <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+            <tr><td style="padding: 6px 0; color: #475569;"><strong>Usuario:</strong></td><td style="padding: 6px 0;"><code style="background-color: #e2e8f0; padding: 3px 8px; border-radius: 6px; font-size: 15px; font-weight: bold; color: #1e293b;">${credentials.username}</code></td></tr>
+            <tr><td style="padding: 6px 0; color: #475569;"><strong>Contraseña:</strong></td><td style="padding: 6px 0;"><code style="background-color: #e2e8f0; padding: 3px 8px; border-radius: 6px; font-size: 15px; font-weight: bold; color: #1e293b;">${credentials.password}</code></td></tr>
+            <tr><td style="padding: 6px 0; color: #475569;"><strong>Días Habilitados:</strong></td><td style="padding: 6px 0; font-weight: bold; color: #1e293b;">${daysRequested} días</td></tr>
+            <tr><td style="padding: 6px 0; color: #475569;"><strong>Vigente Hasta:</strong></td><td style="padding: 6px 0; font-weight: bold; color: #4f46e5;">${expDateStr}</td></tr>
+          </table>
+        </div>
+
+        <div style="text-align: center; margin: 25px 0;">
+          <a href="${appUrl}" style="display: inline-block; background-color: #4f46e5; color: #ffffff; padding: 12px 28px; text-decoration: none; border-radius: 10px; font-weight: bold; font-size: 14px;">
+            Ingresar a InventariosApp
+          </a>
+        </div>
+
+        <p style="font-size: 12px; color: #94a3b8; text-align: center; margin-top: 30px;">
+          Por seguridad te sugerimos cambiar tu contraseña una vez que inicies sesión.
+        </p>
+      </div>
+    `;
+
+    await transporter.sendMail({
+      from: `"InventariosApp" <${fromAddress}>`,
+      to: userEmail,
+      subject: `Tus Credenciales de Acceso - InventariosApp`,
+      html
+    });
+    console.log(`[Email] Credenciales enviadas exitosamente a ${userEmail}.`);
+    return true;
+  } catch (err) {
+    console.error('[Email] Error enviando credenciales a usuario:', err);
+    return false;
   }
 }
 
@@ -705,6 +925,358 @@ app.post('/api/users/restore', requireAdmin, (req, res) => {
     return res.json({ success: true, total: users.length });
   }
   res.status(400).json({ error: 'Formato de usuarios inválido' });
+});
+
+// ==========================================
+// REST API ENDPOINTS FOR PAYMENTS & ACCESS REQUESTS
+// ==========================================
+
+// Public: Get current payment & banking configuration for login & requests
+app.get('/api/public/payment-config', (req, res) => {
+  res.json({
+    pricePerDay: Number(sharedPaymentConfig.pricePerDay) || 5.0,
+    currency: sharedPaymentConfig.currency || 'USD',
+    currencySymbol: sharedPaymentConfig.currencySymbol || '$',
+    bankName: sharedPaymentConfig.bankName || '',
+    accountType: sharedPaymentConfig.accountType || '',
+    accountNumber: sharedPaymentConfig.accountNumber || '',
+    accountHolder: sharedPaymentConfig.accountHolder || '',
+    idNumber: sharedPaymentConfig.idNumber || '',
+    phone: sharedPaymentConfig.phone || '',
+    paymentEmail: sharedPaymentConfig.paymentEmail || '',
+    instructions: sharedPaymentConfig.instructions || ''
+  });
+});
+
+// Public: Submit new access request with voucher
+app.post('/api/access-requests', async (req, res) => {
+  try {
+    const { email, name, phone, daysRequested, voucher, notes } = req.body || {};
+
+    if (!email || !String(email).includes('@')) {
+      return res.status(400).json({ error: 'Debes ingresar un correo electrónico válido.' });
+    }
+
+    const parsedDays = parseInt(daysRequested, 10);
+    if (isNaN(parsedDays) || parsedDays < 1) {
+      return res.status(400).json({ error: 'La cantidad de días solicitados debe ser de al menos 1 día.' });
+    }
+
+    if (!voucher || !voucher.data || String(voucher.data).length < 20) {
+      return res.status(400).json({ error: 'Debes adjuntar el comprobante o voucher de pago (foto o PDF).' });
+    }
+
+    const pricePerDay = Number(sharedPaymentConfig.pricePerDay) || 5.0;
+    const totalAmount = Number((pricePerDay * parsedDays).toFixed(2));
+
+    const newRequest = {
+      id: `req_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      email: String(email).trim().toLowerCase(),
+      name: name ? String(name).trim() : '',
+      phone: phone ? String(phone).trim() : '',
+      daysRequested: parsedDays,
+      pricePerDay,
+      totalAmount,
+      currency: sharedPaymentConfig.currency || 'USD',
+      voucherFilename: voucher.filename ? String(voucher.filename).trim() : 'comprobante.jpg',
+      voucherMimetype: voucher.mimetype ? String(voucher.mimetype).trim() : 'image/jpeg',
+      voucherData: voucher.data,
+      status: 'pending',
+      notes: notes ? String(notes).trim() : '',
+      adminNotes: null,
+      approvedUsername: null,
+      createdAt: new Date().toISOString(),
+      reviewedAt: null
+    };
+
+    // Add to in-memory list
+    sharedAccessRequests.unshift(newRequest);
+    persistAccessRequestsToDisk();
+
+    // Persist to PostgreSQL if connected
+    if (isDbConnected()) {
+      await dbSaveAccessRequest(newRequest);
+    }
+
+    // Real-time broadcast to connected admins
+    io.emit('access-request:new', {
+      id: newRequest.id,
+      email: newRequest.email,
+      name: newRequest.name,
+      daysRequested: newRequest.daysRequested,
+      totalAmount: newRequest.totalAmount,
+      currency: newRequest.currency,
+      createdAt: newRequest.createdAt
+    });
+
+    // Send email notification to admin asynchronously
+    sendAccessRequestEmailToAdmin(newRequest).catch((err) => {
+      console.warn('[Email] Error al notificar al admin por correo:', err.message);
+    });
+
+    console.log(`[AccessRequests] Nueva solicitud recibida de ${newRequest.email} por ${newRequest.daysRequested} días (${sharedPaymentConfig.currencySymbol || '$'}${newRequest.totalAmount}).`);
+
+    res.json({
+      success: true,
+      message: '¡Tu solicitud ha sido enviada con éxito! El administrador verificará tu comprobante y te enviará las credenciales a tu correo.',
+      requestId: newRequest.id
+    });
+  } catch (err) {
+    console.error('[AccessRequests] Error procesando solicitud de acceso:', err);
+    res.status(500).json({ error: 'Error interno al procesar la solicitud de acceso.' });
+  }
+});
+
+// Admin: Get all access requests
+app.get('/api/admin/access-requests', requireAdmin, (req, res) => {
+  res.json(sharedAccessRequests);
+});
+
+// Admin: Get full payment & notification config
+app.get('/api/admin/payment-config', requireAdmin, (req, res) => {
+  res.json(sharedPaymentConfig);
+});
+
+// Admin: Update payment & notification config
+app.put('/api/admin/payment-config', requireAdmin, async (req, res) => {
+  try {
+    const {
+      pricePerDay,
+      currency,
+      currencySymbol,
+      adminNotificationEmail,
+      bankName,
+      accountType,
+      accountNumber,
+      accountHolder,
+      idNumber,
+      phone,
+      paymentEmail,
+      instructions,
+      smtpConfig
+    } = req.body || {};
+
+    if (pricePerDay !== undefined) sharedPaymentConfig.pricePerDay = Math.max(0, Number(pricePerDay) || 0);
+    if (currency !== undefined) sharedPaymentConfig.currency = String(currency).trim().toUpperCase();
+    if (currencySymbol !== undefined) sharedPaymentConfig.currencySymbol = String(currencySymbol).trim();
+    if (adminNotificationEmail !== undefined) sharedPaymentConfig.adminNotificationEmail = String(adminNotificationEmail).trim().toLowerCase();
+    if (bankName !== undefined) sharedPaymentConfig.bankName = String(bankName).trim();
+    if (accountType !== undefined) sharedPaymentConfig.accountType = String(accountType).trim();
+    if (accountNumber !== undefined) sharedPaymentConfig.accountNumber = String(accountNumber).trim();
+    if (accountHolder !== undefined) sharedPaymentConfig.accountHolder = String(accountHolder).trim();
+    if (idNumber !== undefined) sharedPaymentConfig.idNumber = String(idNumber).trim();
+    if (phone !== undefined) sharedPaymentConfig.phone = String(phone).trim();
+    if (paymentEmail !== undefined) sharedPaymentConfig.paymentEmail = String(paymentEmail).trim();
+    if (instructions !== undefined) sharedPaymentConfig.instructions = String(instructions).trim();
+    if (smtpConfig && typeof smtpConfig === 'object') {
+      sharedPaymentConfig.smtpConfig = {
+        host: String(smtpConfig.host || '').trim(),
+        port: Number(smtpConfig.port) || 587,
+        secure: Boolean(smtpConfig.secure),
+        user: String(smtpConfig.user || '').trim(),
+        pass: String(smtpConfig.pass || '').trim(),
+        from: String(smtpConfig.from || '').trim()
+      };
+    }
+
+    persistPaymentConfigToDisk();
+
+    if (isDbConnected()) {
+      await dbSavePaymentConfig(sharedPaymentConfig);
+    }
+
+    console.log(`[Payment] Configuración actualizada por ${req.user.username}. Tarifa: ${sharedPaymentConfig.currencySymbol || '$'}${sharedPaymentConfig.pricePerDay} ${sharedPaymentConfig.currency}/día.`);
+
+    res.json({
+      success: true,
+      message: 'Configuración de pagos y notificaciones guardada exitosamente.',
+      config: sharedPaymentConfig
+    });
+  } catch (err) {
+    console.error('[Payment] Error actualizando configuración de pagos:', err);
+    res.status(500).json({ error: 'Error al guardar la configuración de pagos.' });
+  }
+});
+
+// Admin: Approve access request & generate credentials
+app.put('/api/admin/access-requests/:id/approve', requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { customUsername, customPassword, adminNotes, sendEmail = true } = req.body || {};
+
+  const target = sharedAccessRequests.find((r) => r.id === id);
+  if (!target) {
+    return res.status(404).json({ error: 'Solicitud no encontrada.' });
+  }
+
+  // Generate or sanitize username
+  let finalUsername = '';
+  if (customUsername && String(customUsername).trim()) {
+    finalUsername = String(customUsername).trim().toLowerCase();
+  } else {
+    // Derive from email prefix
+    const base = target.email.split('@')[0].replace(/[^a-zA-Z0-9]/g, '').toLowerCase() || 'usuario';
+    finalUsername = base;
+    let counter = 1;
+    while (sharedUsers.some((u) => u.username.toLowerCase() === finalUsername)) {
+      finalUsername = `${base}${counter}`;
+      counter++;
+    }
+  }
+
+  // Generate or sanitize password
+  let finalPassword = '';
+  if (customPassword && String(customPassword).trim().length >= 4) {
+    finalPassword = String(customPassword).trim();
+  } else {
+    // Generate clean 6-char alphanumeric password
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let code = '';
+    for (let i = 0; i < 6; i++) {
+      code += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    finalPassword = code;
+  }
+
+  // Calculate expiration
+  const days = Math.max(1, Number(target.daysRequested) || 30);
+  const expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+
+  // Check if user already exists (if so, renew instead of error)
+  let existingUser = sharedUsers.find((u) => u.username.toLowerCase() === finalUsername);
+  if (existingUser) {
+    existingUser.accessDays = days;
+    existingUser.expiresAt = expiresAt;
+    const { hash, salt } = hashPassword(finalPassword);
+    existingUser.passwordHash = hash;
+    existingUser.salt = salt;
+    persistUsersToDisk();
+    await dbSaveUser(existingUser);
+  } else {
+    const { hash, salt } = hashPassword(finalPassword);
+    const newUser = {
+      id: `u_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      username: finalUsername,
+      name: target.name || finalUsername,
+      role: 'auditor',
+      accessDays: days,
+      expiresAt,
+      passwordHash: hash,
+      salt,
+      createdAt: new Date().toISOString()
+    };
+    sharedUsers.push(newUser);
+    persistUsersToDisk();
+    await dbSaveUser(newUser);
+  }
+
+  // Update request state
+  target.status = 'approved';
+  target.approvedUsername = finalUsername;
+  target.adminNotes = adminNotes ? String(adminNotes).trim() : null;
+  target.reviewedAt = new Date().toISOString();
+
+  persistAccessRequestsToDisk();
+  if (isDbConnected()) {
+    await dbUpdateAccessRequest(target.id, {
+      status: target.status,
+      adminNotes: target.adminNotes,
+      approvedUsername: target.approvedUsername,
+      reviewedAt: target.reviewedAt
+    });
+  }
+
+  // Try to send email to user if requested
+  let emailSent = false;
+  if (sendEmail) {
+    try {
+      emailSent = await sendCredentialsEmailToUser(
+        target.email,
+        { username: finalUsername, password: finalPassword },
+        days,
+        expiresAt
+      );
+    } catch (err) {
+      console.warn('[Email] No se pudo enviar el correo de credenciales:', err.message);
+    }
+  }
+
+  // Pre-formatted message for admin to copy-paste or send via WhatsApp/Mail
+  const expFormatted = new Date(expiresAt).toLocaleDateString('es-DO', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric'
+  });
+  const copyableMessage = `¡Hola ${target.name || 'estimado usuario'}! Tu acceso a InventariosApp ha sido activado exitosamente:\n\n` +
+    `👤 Usuario: ${finalUsername}\n` +
+    `🔑 Contraseña: ${finalPassword}\n` +
+    `⏳ Vigencia: ${days} días (Vence el ${expFormatted})\n` +
+    `🌐 Enlace: ${sharedTunnelUrl || 'https://inventariosapp.onrender.com'}\n\n` +
+    `¡Gracias por tu pago y preferencia!`;
+
+  io.emit('access-request:updated', target);
+
+  console.log(`[AccessRequests] Solicitud ${target.id} aprobada por ${req.user.username}. Usuario creado: ${finalUsername} (${days} días).`);
+
+  res.json({
+    success: true,
+    message: `Solicitud aprobada con éxito. Usuario creado: ${finalUsername}`,
+    credentials: {
+      username: finalUsername,
+      password: finalPassword,
+      accessDays: days,
+      expiresAt
+    },
+    emailSent,
+    copyableMessage
+  });
+});
+
+// Admin: Reject access request
+app.put('/api/admin/access-requests/:id/reject', requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { adminNotes } = req.body || {};
+
+  const target = sharedAccessRequests.find((r) => r.id === id);
+  if (!target) {
+    return res.status(404).json({ error: 'Solicitud no encontrada.' });
+  }
+
+  target.status = 'rejected';
+  target.adminNotes = adminNotes ? String(adminNotes).trim() : 'Comprobante no válido o pago no verificado.';
+  target.reviewedAt = new Date().toISOString();
+
+  persistAccessRequestsToDisk();
+  if (isDbConnected()) {
+    await dbUpdateAccessRequest(target.id, {
+      status: target.status,
+      adminNotes: target.adminNotes,
+      approvedUsername: null,
+      reviewedAt: target.reviewedAt
+    });
+  }
+
+  io.emit('access-request:updated', target);
+  console.log(`[AccessRequests] Solicitud ${target.id} rechazada por ${req.user.username}.`);
+
+  res.json({
+    success: true,
+    message: 'Solicitud marcada como rechazada.'
+  });
+});
+
+// Admin: Delete access request
+app.delete('/api/admin/access-requests/:id', requireAdmin, async (req, res) => {
+  const { id } = req.params;
+
+  sharedAccessRequests = sharedAccessRequests.filter((r) => r.id !== id);
+  persistAccessRequestsToDisk();
+
+  if (isDbConnected()) {
+    await dbDeleteAccessRequest(id);
+  }
+
+  io.emit('access-request:deleted', { id });
+  res.json({ success: true, message: 'Solicitud eliminada correctamente.' });
 });
 
 // ==========================================
@@ -1782,6 +2354,18 @@ async function startServer() {
         sharedCatalog = dbCatalog;
         console.log(`[Database] ✅ Cargados ${sharedCatalog.length} productos del catálogo desde PostgreSQL.`);
       }
+
+      const dbPayment = await dbLoadPaymentConfig();
+      if (dbPayment && typeof dbPayment === 'object') {
+        sharedPaymentConfig = { ...DEFAULT_PAYMENT_CONFIG, ...dbPayment };
+        console.log(`[Database] ✅ Configuración de pagos cargada desde PostgreSQL. Tarifa: ${sharedPaymentConfig.pricePerDay} ${sharedPaymentConfig.currency}/día.`);
+      }
+
+      const dbRequests = await dbLoadAccessRequests();
+      if (Array.isArray(dbRequests)) {
+        sharedAccessRequests = dbRequests;
+        console.log(`[Database] ✅ Cargadas ${sharedAccessRequests.length} solicitudes de acceso desde PostgreSQL.`);
+      }
     } catch (err) {
       console.error('[Database] Error al cargar datos iniciales de PostgreSQL:', err);
     }
@@ -1797,6 +2381,8 @@ async function startServer() {
   if (sharedCatalog.length === 0) {
     loadCatalogFromDisk();
   }
+  loadPaymentConfigFromDisk();
+  loadAccessRequestsFromDisk();
 
   // 3. Ensure default admin user exists
   if (sharedUsers.length === 0) {

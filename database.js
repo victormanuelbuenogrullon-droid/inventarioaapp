@@ -114,10 +114,29 @@ export async function initDatabaseTables() {
         );
       `);
 
-      // Create index on barcode and codes for fast lookup in Postgres if queried directly
+      // 5. Access Requests Table
       await client.query(`
-        CREATE INDEX IF NOT EXISTS idx_cat_barcode ON catalog_products(codigo_internacional);
-        CREATE INDEX IF NOT EXISTS idx_cat_sku ON catalog_products(codigo_interno);
+        CREATE TABLE IF NOT EXISTS access_requests (
+          id TEXT PRIMARY KEY,
+          email TEXT NOT NULL,
+          name TEXT,
+          phone TEXT,
+          days_requested INTEGER NOT NULL,
+          price_per_day NUMERIC NOT NULL,
+          total_amount NUMERIC NOT NULL,
+          currency TEXT NOT NULL DEFAULT 'USD',
+          voucher_filename TEXT,
+          voucher_mimetype TEXT,
+          voucher_data TEXT,
+          status TEXT NOT NULL DEFAULT 'pending',
+          notes TEXT,
+          admin_notes TEXT,
+          approved_username TEXT,
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          reviewed_at TIMESTAMPTZ
+        );
+        CREATE INDEX IF NOT EXISTS idx_access_requests_status ON access_requests(status);
+        CREATE INDEX IF NOT EXISTS idx_access_requests_created ON access_requests(created_at DESC);
       `);
 
       isConnected = true;
@@ -422,3 +441,134 @@ export async function dbSaveCatalog(catalog) {
     return false;
   }
 }
+
+// ==========================================
+// ACCESS REQUESTS CRUD
+// ==========================================
+
+export async function dbLoadAccessRequests() {
+  const db = getDbPool();
+  if (!db || !isConnected) return null;
+
+  try {
+    const res = await db.query('SELECT * FROM access_requests ORDER BY created_at DESC');
+    return res.rows.map(r => ({
+      id: r.id,
+      email: r.email,
+      name: r.name,
+      phone: r.phone,
+      daysRequested: Number(r.days_requested),
+      pricePerDay: Number(r.price_per_day),
+      totalAmount: Number(r.total_amount),
+      currency: r.currency,
+      voucherFilename: r.voucher_filename,
+      voucherMimetype: r.voucher_mimetype,
+      voucherData: r.voucher_data,
+      status: r.status,
+      notes: r.notes,
+      adminNotes: r.admin_notes,
+      approvedUsername: r.approved_username,
+      createdAt: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
+      reviewedAt: r.reviewed_at ? new Date(r.reviewed_at).toISOString() : null
+    }));
+  } catch (err) {
+    console.error('[Database] Error cargando solicitudes de acceso:', err);
+    return null;
+  }
+}
+
+export async function dbSaveAccessRequest(request) {
+  const db = getDbPool();
+  if (!db || !isConnected) return false;
+
+  try {
+    await db.query(`
+      INSERT INTO access_requests (
+        id, email, name, phone, days_requested, price_per_day, total_amount, currency,
+        voucher_filename, voucher_mimetype, voucher_data, status, notes, admin_notes,
+        approved_username, created_at, reviewed_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+      ON CONFLICT (id) DO UPDATE SET
+        status = EXCLUDED.status,
+        admin_notes = EXCLUDED.admin_notes,
+        approved_username = EXCLUDED.approved_username,
+        reviewed_at = EXCLUDED.reviewed_at;
+    `, [
+      request.id,
+      request.email.toLowerCase().trim(),
+      request.name || null,
+      request.phone || null,
+      request.daysRequested,
+      request.pricePerDay,
+      request.totalAmount,
+      request.currency || 'USD',
+      request.voucherFilename || null,
+      request.voucherMimetype || null,
+      request.voucherData || null,
+      request.status || 'pending',
+      request.notes || null,
+      request.adminNotes || null,
+      request.approvedUsername || null,
+      request.createdAt || new Date().toISOString(),
+      request.reviewedAt || null
+    ]);
+    return true;
+  } catch (err) {
+    console.error('[Database] Error guardando solicitud de acceso:', err);
+    return false;
+  }
+}
+
+export async function dbUpdateAccessRequest(id, updates) {
+  const db = getDbPool();
+  if (!db || !isConnected) return false;
+
+  try {
+    const { status, adminNotes, approvedUsername, reviewedAt } = updates;
+    await db.query(`
+      UPDATE access_requests
+      SET status = COALESCE($1, status),
+          admin_notes = COALESCE($2, admin_notes),
+          approved_username = COALESCE($3, approved_username),
+          reviewed_at = COALESCE($4, reviewed_at)
+      WHERE id = $5
+    `, [
+      status || null,
+      adminNotes !== undefined ? adminNotes : null,
+      approvedUsername !== undefined ? approvedUsername : null,
+      reviewedAt || new Date().toISOString(),
+      id
+    ]);
+    return true;
+  } catch (err) {
+    console.error('[Database] Error actualizando solicitud de acceso:', err);
+    return false;
+  }
+}
+
+export async function dbDeleteAccessRequest(id) {
+  const db = getDbPool();
+  if (!db || !isConnected) return false;
+
+  try {
+    await db.query('DELETE FROM access_requests WHERE id = $1', [id]);
+    return true;
+  } catch (err) {
+    console.error('[Database] Error eliminando solicitud de acceso:', err);
+    return false;
+  }
+}
+
+// ==========================================
+// PAYMENT CONFIGURATION
+// ==========================================
+
+export async function dbLoadPaymentConfig() {
+  const config = await dbLoadSettings('payment_config');
+  return config;
+}
+
+export async function dbSavePaymentConfig(config) {
+  return await dbSaveSettings('payment_config', config);
+}
+
