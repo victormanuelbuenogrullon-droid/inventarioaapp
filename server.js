@@ -8,6 +8,22 @@ import os from 'os';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
+import {
+  initDatabaseTables,
+  isDbConnected,
+  dbLoadUsers,
+  dbSaveUser,
+  dbUpdateUserPassword,
+  dbUpdateUserAccess,
+  dbDeleteUser,
+  dbLoadSessions,
+  dbUpsertSession,
+  dbDeleteSession,
+  dbLoadCatalog,
+  dbSaveCatalog,
+  dbLoadSettings,
+  dbSaveSettings
+} from './database.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -156,76 +172,68 @@ function generateSessionCode() {
 let saveSessionsTimeout = null;
 function persistSessionsToDisk() {
   clearTimeout(saveSessionsTimeout);
-  saveSessionsTimeout = setTimeout(() => {
+  saveSessionsTimeout = setTimeout(async () => {
     try {
       fs.writeFileSync(SESSIONS_FILE, JSON.stringify(sharedSessions, null, 2), 'utf-8');
     } catch (e) {
       console.error('[Storage] Error guardando sesiones en disco:', e);
     }
+    // Also save all sessions to PostgreSQL database if connected
+    if (isDbConnected()) {
+      try {
+        for (const sess of Object.values(sharedSessions)) {
+          await dbUpsertSession(sess);
+        }
+      } catch (err) {
+        console.error('[Database] Error sincronizando sesiones con PostgreSQL:', err);
+      }
+    }
   }, 300);
 }
 
-// Load saved state and sessions from disk if exist
-try {
-  if (fs.existsSync(SESSIONS_FILE)) {
-    const rawSessions = fs.readFileSync(SESSIONS_FILE, 'utf-8');
-    const parsedSessions = JSON.parse(rawSessions);
-    if (parsedSessions && typeof parsedSessions === 'object') {
-      sharedSessions = parsedSessions;
-      Object.values(sharedSessions).forEach((s) => {
-        if (!Array.isArray(s.backups)) s.backups = [];
-      });
-      console.log(`[Storage] ${Object.keys(sharedSessions).length} sesiones de inventario cargadas desde disco.`);
+function loadSessionsFromDisk() {
+  try {
+    if (fs.existsSync(SESSIONS_FILE)) {
+      const rawSessions = fs.readFileSync(SESSIONS_FILE, 'utf-8');
+      const parsedSessions = JSON.parse(rawSessions);
+      if (parsedSessions && typeof parsedSessions === 'object') {
+        sharedSessions = parsedSessions;
+        Object.values(sharedSessions).forEach((s) => {
+          if (!Array.isArray(s.backups)) s.backups = [];
+        });
+        console.log(`[Storage] ${Object.keys(sharedSessions).length} sesiones de inventario cargadas desde disco.`);
+      }
     }
-  }
 
-  // Load legacy single-state file if exists
-  if (fs.existsSync(STATE_FILE)) {
-    const raw = fs.readFileSync(STATE_FILE, 'utf-8');
-    const parsed = JSON.parse(raw);
-    if (parsed && Array.isArray(parsed.countedItems)) {
-      sharedState.sessionName = parsed.sessionName || 'Pase de Inventario General';
-      sharedState.countedItems = parsed.countedItems || [];
-      sharedState.historyLogs = Array.isArray(parsed.historyLogs) ? parsed.historyLogs : [];
-      sharedState.lastUpdated = parsed.lastUpdated || new Date().toISOString();
+    // Load legacy single-state file if exists
+    if (fs.existsSync(STATE_FILE)) {
+      const raw = fs.readFileSync(STATE_FILE, 'utf-8');
+      const parsed = JSON.parse(raw);
+      if (parsed && Array.isArray(parsed.countedItems)) {
+        sharedState.sessionName = parsed.sessionName || 'Pase de Inventario General';
+        sharedState.countedItems = parsed.countedItems || [];
+        sharedState.historyLogs = Array.isArray(parsed.historyLogs) ? parsed.historyLogs : [];
+        sharedState.lastUpdated = parsed.lastUpdated || new Date().toISOString();
+      }
     }
+  } catch (err) {
+    console.error('[Storage] Error al inicializar sesiones desde disco:', err);
   }
-
-  // If no sessions exist yet, migrate from legacy state or initialize default
-  if (Object.keys(sharedSessions).length === 0) {
-    const defaultCode = 'INV-1001';
-    sharedSessions[defaultCode] = {
-      code: defaultCode,
-      name: sharedState.sessionName || 'Pase de Inventario General',
-      createdBy: 'u_admin',
-      creatorUsername: 'admin',
-      creatorName: 'Administrador',
-      createdAt: new Date().toISOString(),
-      expiresAt: null,
-      countedItems: sharedState.countedItems || [],
-      historyLogs: sharedState.historyLogs || [],
-      backups: [],
-      lastUpdated: sharedState.lastUpdated || new Date().toISOString()
-    };
-    persistSessionsToDisk();
-    console.log(`[Storage] Sesión inicial creada con código: ${defaultCode}`);
-  }
-} catch (err) {
-  console.error('[Storage] Error al inicializar sesiones desde disco:', err);
 }
 
-// Load saved catalog from disk if exists
-try {
-  if (fs.existsSync(CATALOG_FILE)) {
-    const rawCat = fs.readFileSync(CATALOG_FILE, 'utf-8');
-    const parsedCat = JSON.parse(rawCat);
-    if (Array.isArray(parsedCat)) {
-      sharedCatalog = parsedCat;
-      console.log(`[Storage] Catálogo compartido cargado desde disco: ${sharedCatalog.length} productos.`);
+function loadCatalogFromDisk() {
+  try {
+    if (fs.existsSync(CATALOG_FILE)) {
+      const rawCat = fs.readFileSync(CATALOG_FILE, 'utf-8');
+      const parsedCat = JSON.parse(rawCat);
+      if (Array.isArray(parsedCat)) {
+        sharedCatalog = parsedCat;
+        console.log(`[Storage] Catálogo compartido cargado desde disco: ${sharedCatalog.length} productos.`);
+      }
     }
+  } catch (err) {
+    console.error('[Storage] Error al leer archivo de catálogo:', err);
   }
-} catch (err) {
-  console.error('[Storage] Error al leer archivo de catálogo:', err);
 }
 
 // Debounced save to disk helpers
@@ -245,12 +253,19 @@ function persistStateToDisk() {
 let saveCatalogTimeout = null;
 function persistCatalogToDisk() {
   clearTimeout(saveCatalogTimeout);
-  saveCatalogTimeout = setTimeout(() => {
+  saveCatalogTimeout = setTimeout(async () => {
     try {
       fs.writeFileSync(CATALOG_FILE, JSON.stringify(sharedCatalog), 'utf-8');
       console.log(`[Catalog] Guardados ${sharedCatalog.length} productos del catálogo en disco.`);
     } catch (e) {
       console.error('[Catalog] Error guardando catálogo en disco:', e);
+    }
+    if (isDbConnected()) {
+      try {
+        await dbSaveCatalog(sharedCatalog);
+      } catch (err) {
+        console.error('[Database] Error guardando catálogo en PostgreSQL:', err);
+      }
     }
   }, 500);
 }
@@ -311,49 +326,19 @@ function persistUsersToDisk() {
   }
 }
 
-// Load saved users from disk or create default admin
-try {
-  if (fs.existsSync(USERS_FILE)) {
-    const rawUsers = fs.readFileSync(USERS_FILE, 'utf-8');
-    const parsedUsers = JSON.parse(rawUsers);
-    if (Array.isArray(parsedUsers) && parsedUsers.length > 0) {
-      sharedUsers = parsedUsers;
-      console.log(`[Auth] Cargados ${sharedUsers.length} usuarios registrados desde disco.`);
-    }
-  }
-
-  // If no users exist, initialize default admin
-  if (sharedUsers.length === 0) {
-    const initialAdminPass = process.env.ADMIN_PASSWORD || 'admin';
-    const { hash, salt } = hashPassword(initialAdminPass);
-    sharedUsers = [
-      {
-        id: 'u_admin',
-        username: 'admin',
-        name: 'Administrador',
-        role: 'admin',
-        passwordHash: hash,
-        salt,
-        createdAt: new Date().toISOString()
+function loadUsersFromDisk() {
+  try {
+    if (fs.existsSync(USERS_FILE)) {
+      const rawUsers = fs.readFileSync(USERS_FILE, 'utf-8');
+      const parsedUsers = JSON.parse(rawUsers);
+      if (Array.isArray(parsedUsers) && parsedUsers.length > 0) {
+        sharedUsers = parsedUsers;
+        console.log(`[Auth] Cargados ${sharedUsers.length} usuarios registrados desde disco.`);
       }
-    ];
-    persistUsersToDisk();
-    console.log('[Auth] Administrador por defecto inicializado.');
-  }
-
-  // If ADMIN_PASSWORD env var is set, enforce it for the admin user
-  if (process.env.ADMIN_PASSWORD) {
-    const adminUser = sharedUsers.find((u) => u.username.toLowerCase() === 'admin');
-    if (adminUser) {
-      const { hash, salt } = hashPassword(process.env.ADMIN_PASSWORD);
-      adminUser.passwordHash = hash;
-      adminUser.salt = salt;
-      persistUsersToDisk();
-      console.log('[Auth] Contraseña de admin actualizada según variable de entorno ADMIN_PASSWORD.');
     }
+  } catch (err) {
+    console.error('[Auth] Error al inicializar usuarios desde disco:', err);
   }
-} catch (err) {
-  console.error('[Auth] Error al inicializar usuarios:', err);
 }
 
 function isUserExpired(user) {
@@ -437,27 +422,13 @@ function getItemKey(p) {
 
 // Login
 app.post('/api/auth/login', (req, res) => {
-  const { username, password, sessionCode, backupUsers } = req.body || {};
+  const { username, password, sessionCode } = req.body || {};
   if (!username || !password) {
     return res.status(400).json({ error: 'Ingresa tu usuario y contraseña' });
   }
 
   const cleanUser = String(username).trim().toLowerCase();
   let user = sharedUsers.find((u) => u.username.toLowerCase() === cleanUser);
-
-  // If user not found or password doesn't match current server state,
-  // check if backupUsers sent from client is valid (e.g. after a Render container restart/wipe)
-  if ((!user || !verifyPassword(String(password), user.passwordHash, user.salt)) && Array.isArray(backupUsers) && backupUsers.length > 0) {
-    const backupTarget = backupUsers.find((u) => u.username && u.username.toLowerCase() === cleanUser);
-    if (backupTarget && backupTarget.passwordHash && backupTarget.salt) {
-      if (verifyPassword(String(password), backupTarget.passwordHash, backupTarget.salt)) {
-        console.log(`[Auth] Restaurando usuarios desde respaldo seguro del cliente tras reinicio.`);
-        sharedUsers = backupUsers;
-        persistUsersToDisk();
-        user = backupTarget;
-      }
-    }
-  }
 
   if (!user || !verifyPassword(String(password), user.passwordHash, user.salt)) {
     return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
@@ -546,7 +517,7 @@ app.get('/api/users', requireAdmin, (req, res) => {
 });
 
 // Create new user (Admin only)
-app.post('/api/users', requireAdmin, (req, res) => {
+app.post('/api/users', requireAdmin, async (req, res) => {
   const { username, password, name, role, accessDays } = req.body || {};
 
   if (!username || !password || !name) {
@@ -593,6 +564,7 @@ app.post('/api/users', requireAdmin, (req, res) => {
 
   sharedUsers.push(newUser);
   persistUsersToDisk();
+  await dbSaveUser(newUser);
 
   console.log(`[Auth] Nuevo usuario creado por ${req.user.username}: ${newUser.username} (${newUser.role}, vigencia: ${parsedDays ? parsedDays + ' días' : 'Permanente'})`);
 
@@ -607,13 +579,12 @@ app.post('/api/users', requireAdmin, (req, res) => {
       expiresAt: newUser.expiresAt,
       isExpired: false,
       createdAt: newUser.createdAt
-    },
-    usersBackup: sharedUsers
+    }
   });
 });
 
 // Update user access duration in days / renewal (Admin only)
-app.put('/api/users/:id/access', requireAdmin, (req, res) => {
+app.put('/api/users/:id/access', requireAdmin, async (req, res) => {
   const { id } = req.params;
   const { accessDays } = req.body || {};
 
@@ -632,6 +603,7 @@ app.put('/api/users/:id/access', requireAdmin, (req, res) => {
   }
 
   persistUsersToDisk();
+  await dbUpdateUserAccess(target.id, target.accessDays, target.expiresAt);
 
   // Synchronize expiration for all sessions created by this user
   Object.values(sharedSessions).forEach(sess => {
@@ -654,13 +626,12 @@ app.put('/api/users/:id/access', requireAdmin, (req, res) => {
       accessDays: target.accessDays,
       expiresAt: target.expiresAt,
       isExpired: isUserExpired(target)
-    },
-    usersBackup: sharedUsers
+    }
   });
 });
 
 // Delete user (Admin only)
-app.delete('/api/users/:id', requireAdmin, (req, res) => {
+app.delete('/api/users/:id', requireAdmin, async (req, res) => {
   const { id } = req.params;
 
   if (req.user.id === id) {
@@ -680,13 +651,14 @@ app.delete('/api/users/:id', requireAdmin, (req, res) => {
 
   sharedUsers = sharedUsers.filter((u) => u.id !== id);
   persistUsersToDisk();
+  await dbDeleteUser(id);
 
   console.log(`[Auth] Usuario ${target.username} eliminado por ${req.user.username}`);
-  res.json({ success: true, message: 'Usuario eliminado correctamente', usersBackup: sharedUsers });
+  res.json({ success: true, message: 'Usuario eliminado correctamente' });
 });
 
 // Change user password (Admin can change any, user can change own)
-app.put('/api/users/:id/password', requireAuth, (req, res) => {
+app.put('/api/users/:id/password', requireAuth, async (req, res) => {
   const { id } = req.params;
   const { newPassword } = req.body || {};
 
@@ -708,11 +680,13 @@ app.put('/api/users/:id/password', requireAuth, (req, res) => {
   target.salt = salt;
   persistUsersToDisk();
 
-  console.log(`[Auth] Contraseña de ${target.username} actualizada con éxito.`);
+  // Commit immediately to PostgreSQL database!
+  await dbUpdateUserPassword(target.id, hash, salt);
+
+  console.log(`[Auth] Contraseña de ${target.username} actualizada con éxito en servidor y base de datos.`);
   res.json({
     success: true,
-    message: 'Contraseña actualizada con éxito.',
-    usersBackup: req.user.role === 'admin' ? sharedUsers : undefined
+    message: 'Contraseña actualizada con éxito en la base de datos.'
   });
 });
 
@@ -847,7 +821,7 @@ app.get('/api/sessions/:code', requireAuth, (req, res) => {
 });
 
 // Delete session (Creator or Admin only)
-app.delete('/api/sessions/:code', requireAuth, (req, res) => {
+app.delete('/api/sessions/:code', requireAuth, async (req, res) => {
   const { code } = req.params;
   const cleanCode = String(code).trim().toUpperCase();
   const session = sharedSessions[cleanCode];
@@ -860,6 +834,8 @@ app.delete('/api/sessions/:code', requireAuth, (req, res) => {
 
   delete sharedSessions[cleanCode];
   persistSessionsToDisk();
+  await dbDeleteSession(cleanCode);
+
   console.log(`[Sessions] Sesión ${cleanCode} eliminada por ${req.user.username}`);
   res.json({ success: true, message: `Sesión ${cleanCode} eliminada correctamente.` });
 });
@@ -1783,17 +1759,115 @@ if (fs.existsSync(DIST_PATH)) {
   });
 }
 
-httpServer.listen(PORT, '0.0.0.0', () => {
-  const localIp = getLocalIpAddress();
-  console.log(`======================================================================`);
-  console.log(` 🚀 Servidor de Inventario Colaborativo en Línea`);
-  console.log(` 💻 Esta PC (Local):     http://localhost:${PORT}`);
-  console.log(` 📶 Red Local (Wi-Fi):   http://${localIp}:${PORT}`);
-  console.log(` 👥 Sincronización multiusuario en tiempo real activa`);
-  console.log(` 📦 Catálogo en servidor: ${sharedCatalog.length} productos`);
-  console.log(` 📝 Productos contados:   ${sharedState.countedItems.length}`);
-  console.log(`======================================================================`);
-  
-  // Start Cloudflare Tunnel automatically
-  startCloudflareTunnel(PORT);
-});
+async function startServer() {
+  // 1. Initialize PostgreSQL database tables if DATABASE_URL is configured
+  const hasDb = await initDatabaseTables();
+
+  if (hasDb) {
+    try {
+      const dbUsers = await dbLoadUsers();
+      if (dbUsers && dbUsers.length > 0) {
+        sharedUsers = dbUsers;
+        console.log(`[Database] ✅ Cargados ${sharedUsers.length} usuarios registrados desde PostgreSQL.`);
+      }
+
+      const dbSessions = await dbLoadSessions();
+      if (dbSessions && Object.keys(dbSessions).length > 0) {
+        sharedSessions = dbSessions;
+        console.log(`[Database] ✅ Cargadas ${Object.keys(sharedSessions).length} sesiones de inventario desde PostgreSQL.`);
+      }
+
+      const dbCatalog = await dbLoadCatalog();
+      if (Array.isArray(dbCatalog) && dbCatalog.length > 0) {
+        sharedCatalog = dbCatalog;
+        console.log(`[Database] ✅ Cargados ${sharedCatalog.length} productos del catálogo desde PostgreSQL.`);
+      }
+    } catch (err) {
+      console.error('[Database] Error al cargar datos iniciales de PostgreSQL:', err);
+    }
+  }
+
+  // 2. Fallback to local files if database was empty or not connected
+  if (sharedUsers.length === 0) {
+    loadUsersFromDisk();
+  }
+  if (Object.keys(sharedSessions).length === 0) {
+    loadSessionsFromDisk();
+  }
+  if (sharedCatalog.length === 0) {
+    loadCatalogFromDisk();
+  }
+
+  // 3. Ensure default admin user exists
+  if (sharedUsers.length === 0) {
+    const initialAdminPass = process.env.ADMIN_PASSWORD || 'admin';
+    const { hash, salt } = hashPassword(initialAdminPass);
+    const defaultAdmin = {
+      id: 'u_admin',
+      username: 'admin',
+      name: 'Administrador',
+      role: 'admin',
+      passwordHash: hash,
+      salt,
+      createdAt: new Date().toISOString()
+    };
+    sharedUsers = [defaultAdmin];
+    persistUsersToDisk();
+    await dbSaveUser(defaultAdmin);
+    console.log('[Auth] Administrador por defecto inicializado.');
+  }
+
+  // Enforce ADMIN_PASSWORD environment variable if set
+  if (process.env.ADMIN_PASSWORD) {
+    const adminUser = sharedUsers.find((u) => u.username.toLowerCase() === 'admin');
+    if (adminUser) {
+      const { hash, salt } = hashPassword(process.env.ADMIN_PASSWORD);
+      adminUser.passwordHash = hash;
+      adminUser.salt = salt;
+      persistUsersToDisk();
+      await dbUpdateUserPassword(adminUser.id, hash, salt);
+      console.log('[Auth] Contraseña de admin actualizada según variable de entorno ADMIN_PASSWORD.');
+    }
+  }
+
+  // 4. Ensure default session exists
+  if (Object.keys(sharedSessions).length === 0) {
+    const defaultCode = 'INV-1001';
+    const defaultSess = {
+      code: defaultCode,
+      name: sharedState.sessionName || 'Pase de Inventario General',
+      createdBy: 'u_admin',
+      creatorUsername: 'admin',
+      creatorName: 'Administrador',
+      createdAt: new Date().toISOString(),
+      expiresAt: null,
+      countedItems: sharedState.countedItems || [],
+      historyLogs: sharedState.historyLogs || [],
+      backups: [],
+      lastUpdated: sharedState.lastUpdated || new Date().toISOString()
+    };
+    sharedSessions[defaultCode] = defaultSess;
+    persistSessionsToDisk();
+    await dbUpsertSession(defaultSess);
+    console.log(`[Storage] Sesión inicial creada con código: ${defaultCode}`);
+  }
+
+  // 5. Start listening
+  httpServer.listen(PORT, '0.0.0.0', () => {
+    const localIp = getLocalIpAddress();
+    console.log(`======================================================================`);
+    console.log(` 🚀 Servidor de Inventario Colaborativo en Línea`);
+    console.log(` 💻 Esta PC (Local):     http://localhost:${PORT}`);
+    console.log(` 📶 Red Local (Wi-Fi):   http://${localIp}:${PORT}`);
+    console.log(` 👥 Sincronización multiusuario en tiempo real activa`);
+    console.log(` 💾 Base de Datos:       ${isDbConnected() ? 'PostgreSQL (Cloud Persistente)' : 'Archivos Locales'}`);
+    console.log(` 📦 Catálogo en servidor: ${sharedCatalog.length} productos`);
+    console.log(` 📝 Sesiones activas:    ${Object.keys(sharedSessions).length}`);
+    console.log(`======================================================================`);
+    
+    // Start Cloudflare Tunnel automatically
+    startCloudflareTunnel(PORT);
+  });
+}
+
+startServer();

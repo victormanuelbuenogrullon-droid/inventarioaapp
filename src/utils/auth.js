@@ -2,7 +2,6 @@ import { getServerBaseUrl } from './socket';
 
 const TOKEN_KEY = 'inventariosapp_token_v1';
 const USER_KEY = 'inventariosapp_user_v1';
-const USERS_BACKUP_KEY = 'inventariosapp_users_backup';
 
 export function getStoredToken() {
   return localStorage.getItem(TOKEN_KEY) || '';
@@ -14,25 +13,6 @@ export function getStoredUser() {
     return raw ? JSON.parse(raw) : null;
   } catch {
     return null;
-  }
-}
-
-export function getStoredUsersBackup() {
-  try {
-    const raw = localStorage.getItem(USERS_BACKUP_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
-
-export function saveUsersBackup(users) {
-  if (Array.isArray(users) && users.length > 0) {
-    try {
-      localStorage.setItem(USERS_BACKUP_KEY, JSON.stringify(users));
-    } catch (e) {
-      console.warn('Error guardando respaldo de usuarios:', e);
-    }
   }
 }
 
@@ -48,12 +28,11 @@ export function clearAuthSession() {
 
 export async function loginUser(username, password, sessionCode = null) {
   const baseUrl = getServerBaseUrl();
-  const backupUsers = getStoredUsersBackup();
 
   const response = await fetch(`${baseUrl}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password, sessionCode, backupUsers })
+    body: JSON.stringify({ username, password, sessionCode })
   });
 
   const data = await response.json().catch(() => ({}));
@@ -62,10 +41,6 @@ export async function loginUser(username, password, sessionCode = null) {
   }
 
   saveAuthSession(data.token, data.user);
-  if (data.usersBackup) {
-    saveUsersBackup(data.usersBackup);
-  }
-
   return data;
 }
 
@@ -98,7 +73,7 @@ export async function fetchCurrentUser() {
   }
 }
 
-export async function fetchAllUsers() {
+export async function fetchUsersList() {
   const token = getStoredToken();
   const baseUrl = getServerBaseUrl();
   const response = await fetch(`${baseUrl}/api/users`, {
@@ -112,18 +87,10 @@ export async function fetchAllUsers() {
     throw new Error(data.error || 'Error al obtener usuarios');
   }
 
-  // Also silently fetch full backup if admin
-  fetch(`${baseUrl}/api/users/backup`, {
-    headers: { 'Authorization': `Bearer ${token}` }
-  })
-    .then((res) => (res.ok ? res.json() : null))
-    .then((backup) => {
-      if (backup) saveUsersBackup(backup);
-    })
-    .catch(() => {});
-
   return data;
 }
+
+export const fetchAllUsers = fetchUsersList;
 
 export async function createNewUser({ username, password, name, role, accessDays }) {
   const token = getStoredToken();
@@ -140,10 +107,6 @@ export async function createNewUser({ username, password, name, role, accessDays
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(data.error || 'Error al crear usuario');
-  }
-
-  if (data.usersBackup) {
-    saveUsersBackup(data.usersBackup);
   }
 
   return data.user;
@@ -166,10 +129,6 @@ export async function updateUserAccess(userId, accessDays) {
     throw new Error(data.error || 'Error al actualizar vigencia de acceso');
   }
 
-  if (data.usersBackup) {
-    saveUsersBackup(data.usersBackup);
-  }
-
   return data.user;
 }
 
@@ -186,10 +145,6 @@ export async function deleteUser(userId) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(data.error || 'Error al eliminar usuario');
-  }
-
-  if (data.usersBackup) {
-    saveUsersBackup(data.usersBackup);
   }
 
   return data;
@@ -210,10 +165,6 @@ export async function updateUserPassword(userId, newPassword) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(data.error || 'Error al cambiar contraseña');
-  }
-
-  if (data.usersBackup) {
-    saveUsersBackup(data.usersBackup);
   }
 
   return data;
