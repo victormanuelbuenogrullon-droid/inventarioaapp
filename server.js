@@ -155,13 +155,18 @@ const DEFAULT_PAYMENT_CONFIG = {
   phone: '+1 (555) 123-4567',
   paymentEmail: 'pagos@inventariosapp.com',
   instructions: 'Por favor realiza el pago o transferencia por el monto exacto calculado para los días solicitados. Luego sube tu comprobante (captura o PDF) para que el Administrador procese tu acceso.',
+  emailProvider: 'brevo', // 'brevo' | 'resend' | 'smtp'
   smtpConfig: {
-    host: process.env.SMTP_HOST || '',
+    provider: 'brevo',
+    apiKey: process.env.BREVO_API_KEY || process.env.RESEND_API_KEY || '',
+    host: process.env.SMTP_HOST || 'smtp.gmail.com',
     port: process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : 587,
     secure: process.env.SMTP_SECURE === 'true',
     user: process.env.SMTP_USER || '',
     pass: process.env.SMTP_PASS || '',
-    from: process.env.SMTP_FROM || ''
+    from: process.env.SMTP_FROM || '',
+    fromEmail: process.env.SMTP_FROM_EMAIL || '',
+    fromName: 'InventariosApp'
   }
 };
 
@@ -436,8 +441,137 @@ function createTransporter(customSmtp) {
     host,
     port,
     secure: port === 465 || secure,
-    auth: { user, pass }
+    auth: { user, pass },
+    tls: {
+      rejectUnauthorized: false
+    },
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 15000
   });
+}
+
+/**
+ * Universal email dispatcher:
+ * - Brevo HTTPS API (Works 100% on Render Free Tier via Port 443 without firewall blockage!)
+ * - Resend HTTPS API (Works 100% on Render Free Tier via Port 443!)
+ * - Traditional SMTP (Nodemailer for custom hosts / paid tiers)
+ */
+async function sendAppEmail({ to, subject, html, attachments = [], configOverride = null }) {
+  const paymentConfig = configOverride || sharedPaymentConfig;
+  const smtp = paymentConfig.smtpConfig || {};
+  const provider = smtp.provider || paymentConfig.emailProvider || 
+    (smtp.apiKey?.startsWith('xkeysib-') ? 'brevo' : (smtp.apiKey?.startsWith('re_') ? 'resend' : 'smtp'));
+
+  // 1. BREVO HTTPS API (Port 443 - Recommended for Render)
+  if (provider === 'brevo' || smtp.apiKey?.startsWith('xkeysib-')) {
+    const apiKey = (smtp.apiKey || process.env.BREVO_API_KEY || '').trim();
+    if (!apiKey) {
+      throw new Error('Falta la Clave API de Brevo (inicia con xkeysib-). Genera una gratis en https://app.brevo.com/settings/keys/api');
+    }
+
+    const fromEmail = (smtp.fromEmail || smtp.user || paymentConfig.adminNotificationEmail || 'notificaciones@inventariosapp.com').trim();
+    const fromName = smtp.fromName || 'InventariosApp';
+
+    const brevoAttachments = attachments.map(att => {
+      let base64Content = '';
+      if (Buffer.isBuffer(att.content)) {
+        base64Content = att.content.toString('base64');
+      } else if (typeof att.content === 'string') {
+        base64Content = att.content.includes(',') ? att.content.split(',')[1] : att.content;
+      }
+      return {
+        name: att.filename,
+        content: base64Content
+      };
+    });
+
+    const payload = {
+      sender: { name: fromName, email: fromEmail },
+      to: [{ email: to }],
+      subject,
+      htmlContent: html,
+      attachment: brevoAttachments.length > 0 ? brevoAttachments : undefined
+    };
+
+    const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: {
+        'api-key': apiKey,
+        'Content-Type': 'application/json',
+        'accept': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.message || data.error || `Error en Brevo API (código ${res.status})`);
+    }
+    return { success: true, messageId: data.messageId, provider: 'Brevo API (HTTPS)' };
+  }
+
+  // 2. RESEND HTTPS API (Port 443)
+  if (provider === 'resend' || smtp.apiKey?.startsWith('re_')) {
+    const apiKey = (smtp.apiKey || process.env.RESEND_API_KEY || '').trim();
+    if (!apiKey) {
+      throw new Error('Falta la Clave API de Resend (inicia con re_). Genera una gratis en https://resend.com/api-keys');
+    }
+
+    const from = smtp.from || 'InventariosApp <onboarding@resend.dev>';
+    const resendAttachments = attachments.map(att => {
+      let base64Content = '';
+      if (Buffer.isBuffer(att.content)) {
+        base64Content = att.content.toString('base64');
+      } else if (typeof att.content === 'string') {
+        base64Content = att.content.includes(',') ? att.content.split(',')[1] : att.content;
+      }
+      return {
+        filename: att.filename,
+        content: base64Content
+      };
+    });
+
+    const payload = {
+      from,
+      to: [to],
+      subject,
+      html,
+      attachments: resendAttachments.length > 0 ? resendAttachments : undefined
+    };
+
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.message || data.error || `Error en Resend API (código ${res.status})`);
+    }
+    return { success: true, messageId: data.id, provider: 'Resend API (HTTPS)' };
+  }
+
+  // 3. TRADITIONAL SMTP (Nodemailer)
+  const transporter = createTransporter(smtp);
+  if (!transporter) {
+    throw new Error('Servidor SMTP o API de correo no configurado.');
+  }
+
+  const fromAddress = smtp.from || process.env.SMTP_FROM || smtp.user || process.env.SMTP_USER;
+  const info = await transporter.sendMail({
+    from: fromAddress.includes('<') ? fromAddress : `"InventariosApp" <${fromAddress}>`,
+    to,
+    subject,
+    html,
+    attachments
+  });
+
+  return { success: true, messageId: info.messageId, provider: 'SMTP' };
 }
 
 async function sendAccessRequestEmailToAdmin(request) {
@@ -447,21 +581,12 @@ async function sendAccessRequestEmailToAdmin(request) {
     return false;
   }
 
-  const transporter = createTransporter();
-  if (!transporter) {
-    console.log('[Email] Servidor SMTP no configurado. La solicitud se visualiza en el panel de administrador.');
-    return false;
-  }
-
   try {
-    const fromAddress = sharedPaymentConfig.smtpConfig?.from || process.env.SMTP_FROM || sharedPaymentConfig.smtpConfig?.user || process.env.SMTP_USER;
     const attachments = [];
     if (request.voucherData && request.voucherFilename) {
-      const parts = request.voucherData.split(',');
-      const base64Content = parts.length > 1 ? parts[1] : parts[0];
       attachments.push({
         filename: request.voucherFilename,
-        content: Buffer.from(base64Content, 'base64'),
+        content: request.voucherData,
         contentType: request.voucherMimetype || 'application/octet-stream'
       });
     }
@@ -491,30 +616,22 @@ async function sendAccessRequestEmailToAdmin(request) {
       </div>
     `;
 
-    await transporter.sendMail({
-      from: `"InventariosApp" <${fromAddress}>`,
+    const result = await sendAppEmail({
       to: adminEmail,
       subject: `Nueva Solicitud de Acceso: ${request.name || request.email} (${request.daysRequested} días - ${currSym}${request.totalAmount})`,
       html,
       attachments
     });
-    console.log(`[Email] Notificación de solicitud enviada a administrador (${adminEmail}).`);
+    console.log(`[Email] Notificación de solicitud enviada a administrador (${adminEmail}) vía ${result.provider}.`);
     return true;
   } catch (err) {
-    console.error('[Email] Error enviando correo al administrador:', err);
+    console.error('[Email] Error enviando correo al administrador:', err.message);
     return false;
   }
 }
 
 async function sendCredentialsEmailToUser(userEmail, credentials, daysRequested, expiresAt) {
-  const transporter = createTransporter();
-  if (!transporter) {
-    console.log('[Email] Servidor SMTP no configurado. Credenciales disponibles en pantalla de admin.');
-    return false;
-  }
-
   try {
-    const fromAddress = sharedPaymentConfig.smtpConfig?.from || process.env.SMTP_FROM || sharedPaymentConfig.smtpConfig?.user || process.env.SMTP_USER;
     const expDateStr = expiresAt ? new Date(expiresAt).toLocaleDateString('es-DO', { day: '2-digit', month: '2-digit', year: 'numeric' }) : 'Acceso permanente';
     const appUrl = sharedTunnelUrl || 'https://inventariosapp.onrender.com';
 
@@ -547,16 +664,15 @@ async function sendCredentialsEmailToUser(userEmail, credentials, daysRequested,
       </div>
     `;
 
-    await transporter.sendMail({
-      from: `"InventariosApp" <${fromAddress}>`,
+    const result = await sendAppEmail({
       to: userEmail,
       subject: `Tus Credenciales de Acceso - InventariosApp`,
       html
     });
-    console.log(`[Email] Credenciales enviadas exitosamente a ${userEmail}.`);
+    console.log(`[Email] Credenciales enviadas exitosamente a ${userEmail} vía ${result.provider}.`);
     return true;
   } catch (err) {
-    console.error('[Email] Error enviando credenciales a usuario:', err);
+    console.error('[Email] Error enviando credenciales a usuario:', err.message);
     return false;
   }
 }
@@ -1053,6 +1169,7 @@ app.put('/api/admin/payment-config', requireAdmin, async (req, res) => {
       phone,
       paymentEmail,
       instructions,
+      emailProvider,
       smtpConfig
     } = req.body || {};
 
@@ -1068,15 +1185,25 @@ app.put('/api/admin/payment-config', requireAdmin, async (req, res) => {
     if (phone !== undefined) sharedPaymentConfig.phone = String(phone).trim();
     if (paymentEmail !== undefined) sharedPaymentConfig.paymentEmail = String(paymentEmail).trim();
     if (instructions !== undefined) sharedPaymentConfig.instructions = String(instructions).trim();
+    if (emailProvider !== undefined) sharedPaymentConfig.emailProvider = String(emailProvider).trim();
+
     if (smtpConfig && typeof smtpConfig === 'object') {
+      const existing = sharedPaymentConfig.smtpConfig || {};
+      const chosenProvider = String(smtpConfig.provider || emailProvider || existing.provider || 'brevo').trim();
       sharedPaymentConfig.smtpConfig = {
-        host: String(smtpConfig.host || '').trim(),
-        port: Number(smtpConfig.port) || 587,
-        secure: Boolean(smtpConfig.secure),
-        user: String(smtpConfig.user || '').trim(),
-        pass: String(smtpConfig.pass || '').trim(),
-        from: String(smtpConfig.from || '').trim()
+        ...existing,
+        provider: chosenProvider,
+        apiKey: String(smtpConfig.apiKey !== undefined ? smtpConfig.apiKey : (existing.apiKey || '')).trim(),
+        host: String(smtpConfig.host !== undefined ? smtpConfig.host : (existing.host || 'smtp.gmail.com')).trim(),
+        port: Number(smtpConfig.port) || existing.port || 587,
+        secure: Boolean(smtpConfig.secure !== undefined ? smtpConfig.secure : existing.secure),
+        user: String(smtpConfig.user !== undefined ? smtpConfig.user : (existing.user || '')).trim(),
+        pass: String(smtpConfig.pass !== undefined ? smtpConfig.pass : (existing.pass || '')).trim(),
+        from: String(smtpConfig.from !== undefined ? smtpConfig.from : (existing.from || '')).trim(),
+        fromEmail: String(smtpConfig.fromEmail !== undefined ? smtpConfig.fromEmail : (existing.fromEmail || '')).trim(),
+        fromName: String(smtpConfig.fromName !== undefined ? smtpConfig.fromName : (existing.fromName || 'InventariosApp')).trim()
       };
+      sharedPaymentConfig.emailProvider = chosenProvider;
     }
 
     persistPaymentConfigToDisk();
@@ -1085,7 +1212,7 @@ app.put('/api/admin/payment-config', requireAdmin, async (req, res) => {
       await dbSavePaymentConfig(sharedPaymentConfig);
     }
 
-    console.log(`[Payment] Configuración actualizada por ${req.user.username}. Tarifa: ${sharedPaymentConfig.currencySymbol || '$'}${sharedPaymentConfig.pricePerDay} ${sharedPaymentConfig.currency}/día.`);
+    console.log(`[Payment] Configuración actualizada por ${req.user.username}. Tarifa: ${sharedPaymentConfig.currencySymbol || '$'}${sharedPaymentConfig.pricePerDay} ${sharedPaymentConfig.currency}/día. Proveedor de correo: ${sharedPaymentConfig.emailProvider}`);
 
     res.json({
       success: true,
@@ -1101,64 +1228,94 @@ app.put('/api/admin/payment-config', requireAdmin, async (req, res) => {
 // Admin: Test SMTP configuration by sending a verification email
 app.post('/api/admin/payment-config/test-smtp', requireAdmin, async (req, res) => {
   try {
-    const { smtpConfig, targetEmail } = req.body || {};
-    const effectiveSmtp = smtpConfig || sharedPaymentConfig.smtpConfig;
+    const { smtpConfig, targetEmail, emailProvider } = req.body || {};
+    const effectiveSmtp = smtpConfig || sharedPaymentConfig.smtpConfig || {};
+    const provider = effectiveSmtp.provider || emailProvider || sharedPaymentConfig.emailProvider || 
+      (effectiveSmtp.apiKey?.startsWith('xkeysib-') ? 'brevo' : (effectiveSmtp.apiKey?.startsWith('re_') ? 'resend' : 'smtp'));
+    
     const recipient = targetEmail || sharedPaymentConfig.adminNotificationEmail || req.user.username;
-
-    if (!effectiveSmtp?.host || !effectiveSmtp?.user || !effectiveSmtp?.pass) {
-      return res.status(400).json({ error: 'Debes completar el Servidor (Host), Usuario y Contraseña SMTP.' });
-    }
 
     if (!recipient || !recipient.includes('@')) {
       return res.status(400).json({ error: 'Debes especificar un correo de destino válido para recibir la prueba.' });
     }
 
-    const transporter = createTransporter(effectiveSmtp);
-    if (!transporter) {
-      return res.status(400).json({ error: 'No se pudo inicializar la conexión con los datos provistos.' });
+    if (provider === 'brevo' || effectiveSmtp.apiKey?.startsWith('xkeysib-')) {
+      if (!effectiveSmtp.apiKey || !effectiveSmtp.apiKey.trim()) {
+        return res.status(400).json({ error: 'Debes ingresar tu Clave API de Brevo (inicia con xkeysib-). Puedes crearla gratis en https://app.brevo.com/settings/keys/api' });
+      }
+    } else if (provider === 'resend' || effectiveSmtp.apiKey?.startsWith('re_')) {
+      if (!effectiveSmtp.apiKey || !effectiveSmtp.apiKey.trim()) {
+        return res.status(400).json({ error: 'Debes ingresar tu Clave API de Resend (inicia con re_). Puedes crearla gratis en https://resend.com/api-keys' });
+      }
+    } else {
+      if (!effectiveSmtp.host || !effectiveSmtp.user || !effectiveSmtp.pass) {
+        return res.status(400).json({ error: 'Debes completar el Servidor (Host), Usuario y Contraseña SMTP.' });
+      }
     }
 
-    const fromAddress = effectiveSmtp.from || effectiveSmtp.user;
+    const testConfig = {
+      ...sharedPaymentConfig,
+      emailProvider: provider,
+      smtpConfig: {
+        ...effectiveSmtp,
+        provider
+      }
+    };
 
-    const info = await transporter.sendMail({
-      from: `"InventariosApp Verificación" <${fromAddress}>`,
-      to: recipient,
-      subject: `✅ Correo de Prueba Exitoso - InventariosApp`,
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 550px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 14px; background-color: #ffffff;">
-          <div style="background-color: #10b981; padding: 14px; border-radius: 10px; margin-bottom: 20px; text-align: center;">
-            <h2 style="color: #ffffff; margin: 0; font-size: 18px;">🎉 ¡Conexión SMTP Exitosa!</h2>
-          </div>
-          <p style="font-size: 14px; color: #334155;">Hola Administrador,</p>
-          <p style="font-size: 14px; color: #334155;">Este es un mensaje de prueba para verificar que tu servidor SMTP funciona a la perfección en <strong>InventariosApp</strong>.</p>
-          
-          <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 14px; margin: 18px 0; font-size: 13px;">
-            <p style="margin: 4px 0;"><strong>Servidor:</strong> ${effectiveSmtp.host}:${effectiveSmtp.port}</p>
-            <p style="margin: 4px 0;"><strong>Remitente:</strong> ${fromAddress}</p>
-            <p style="margin: 4px 0;"><strong>Destinatario de prueba:</strong> ${recipient}</p>
-          </div>
-          
-          <p style="font-size: 13px; color: #64748b;">
-            A partir de ahora, cada vez que un usuario solicite acceso recibirás el comprobante (voucher) adjunto en tu correo, y al aprobar su solicitud el sistema le enviará sus credenciales automáticamente.
-          </p>
+    const providerLabel = provider === 'brevo' 
+      ? 'Brevo API (HTTPS Puerto 443)' 
+      : provider === 'resend' 
+        ? 'Resend API (HTTPS Puerto 443)' 
+        : `SMTP Tradicional (${effectiveSmtp.host}:${effectiveSmtp.port || 587})`;
+
+    const html = `
+      <div style="font-family: Arial, sans-serif; max-width: 550px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 14px; background-color: #ffffff;">
+        <div style="background-color: #10b981; padding: 14px; border-radius: 10px; margin-bottom: 20px; text-align: center;">
+          <h2 style="color: #ffffff; margin: 0; font-size: 18px;">🎉 ¡Verificación de Correo Exitosa!</h2>
         </div>
-      `
+        <p style="font-size: 14px; color: #334155;">Hola Administrador,</p>
+        <p style="font-size: 14px; color: #334155;">Este es un mensaje de prueba para verificar que tu servicio de correos funciona a la perfección en <strong>InventariosApp</strong>.</p>
+        
+        <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 14px; margin: 18px 0; font-size: 13px;">
+          <p style="margin: 4px 0;"><strong>Proveedor Utilizado:</strong> ${providerLabel}</p>
+          <p style="margin: 4px 0;"><strong>Destinatario de prueba:</strong> ${recipient}</p>
+          <p style="margin: 4px 0;"><strong>Fecha y Hora:</strong> ${new Date().toLocaleString('es-DO')}</p>
+        </div>
+        
+        <p style="font-size: 13px; color: #64748b; line-height: 1.5;">
+          A partir de ahora, cada vez que un usuario solicite acceso recibirás el comprobante de pago (voucher) adjunto en tu correo, y al pulsar "Aprobar" el sistema le enviará sus credenciales automáticamente.
+        </p>
+      </div>
+    `;
+
+    const sendResult = await sendAppEmail({
+      to: recipient,
+      subject: `✅ Correo de Prueba Exitoso - InventariosApp (${providerLabel})`,
+      html,
+      configOverride: testConfig
     });
 
-    console.log(`[SMTP Test] Correo de prueba enviado exitosamente a ${recipient} (id: ${info.messageId})`);
+    console.log(`[Email Test] Correo de prueba enviado exitosamente a ${recipient} vía ${sendResult.provider}`);
     res.json({
       success: true,
-      message: `¡Correo de prueba enviado con éxito a ${recipient}! Revisa tu bandeja de entrada o spam.`,
-      messageId: info.messageId
+      message: `¡Correo de prueba enviado con éxito a ${recipient} a través de ${sendResult.provider}! Revisa tu bandeja de entrada o spam.`,
+      messageId: sendResult.messageId,
+      provider: sendResult.provider
     });
   } catch (err) {
-    console.error('[SMTP Test] Error en prueba de correo:', err);
-    let friendlyError = err.message || 'Error al conectar con el servidor SMTP';
-    if (friendlyError.includes('EAUTH') || friendlyError.includes('Invalid login') || friendlyError.includes('Username and Password not accepted')) {
-      friendlyError = 'Error de autenticación: El usuario o contraseña no es correcto. En Gmail, debes generar una "Contraseña de Aplicación" de 16 caracteres desde la configuración de seguridad de Google.';
-    } else if (friendlyError.includes('ETIMEDOUT') || friendlyError.includes('ESOCKET') || friendlyError.includes('ECONNREFUSED')) {
-      friendlyError = 'No se pudo conectar al servidor SMTP. Verifica el Servidor (ej. smtp.gmail.com) y el Puerto (587 o 465).';
+    console.error('[Email Test] Error en prueba de correo:', err);
+    let friendlyError = err.message || 'Error al conectar con el servicio de correo';
+    
+    if (friendlyError.includes('ETIMEDOUT') || friendlyError.includes('Connection timeout') || friendlyError.includes('ESOCKET')) {
+      friendlyError = 'Tiempo de conexión agotado (Connection timeout). Render bloquea los puertos SMTP salientes (587, 465, 25) en su plan gratuito. Te recomendamos cambiar a la opción "Brevo API" arriba, la cual funciona 100% garantizada en Render vía HTTPS (puerto 443) y es gratuita (300 correos/día).';
+    } else if (friendlyError.includes('Key not found') || friendlyError.includes('unauthorized') || friendlyError.includes('Invalid API Key') || friendlyError.includes('Key is invalid')) {
+      friendlyError = 'La clave API ingresada no es válida o fue rechazada. Verifica haber copiado la clave correcta desde la consola de Brevo o Resend.';
+    } else if (friendlyError.includes('Sender not found') || friendlyError.includes('unverified') || friendlyError.includes('sender is not verified')) {
+      friendlyError = 'El correo remitente aún no está verificado en Brevo. En Brevo entra a "Senders & IP" -> "Senders", agrega tu correo y pulsa el enlace de confirmación que te llegará.';
+    } else if (friendlyError.includes('EAUTH') || friendlyError.includes('Invalid login') || friendlyError.includes('Username and Password not accepted')) {
+      friendlyError = 'Error de autenticación SMTP: Usuario o contraseña incorrectos. En Gmail recuerda generar una "Contraseña de Aplicación" de 16 caracteres.';
     }
+
     res.status(500).json({ error: friendlyError });
   }
 });

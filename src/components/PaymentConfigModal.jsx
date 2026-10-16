@@ -12,7 +12,13 @@ import {
   Loader2,
   Server,
   KeyRound,
-  FileText
+  FileText,
+  ExternalLink,
+  Eye,
+  EyeOff,
+  Zap,
+  ShieldCheck,
+  Send
 } from 'lucide-react';
 import { fetchAdminPaymentConfig, updateAdminPaymentConfig, testSmtpConnection } from '../utils/payment';
 
@@ -24,6 +30,8 @@ export default function PaymentConfigModal({ isOpen, onClose }) {
   const [smtpTestResult, setSmtpTestResult] = useState(null);
   const [successMessage, setSuccessMessage] = useState(null);
   const [errorMessage, setErrorMessage] = useState(null);
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [showSmtpPass, setShowSmtpPass] = useState(false);
 
   // Form State
   const [formData, setFormData] = useState({
@@ -39,13 +47,18 @@ export default function PaymentConfigModal({ isOpen, onClose }) {
     phone: '',
     paymentEmail: '',
     instructions: '',
+    emailProvider: 'brevo', // 'brevo' | 'resend' | 'smtp'
     smtpConfig: {
-      host: '',
+      provider: 'brevo',
+      apiKey: '',
+      host: 'smtp.gmail.com',
       port: 587,
       secure: false,
       user: '',
       pass: '',
-      from: ''
+      from: '',
+      fromEmail: '',
+      fromName: 'InventariosApp'
     }
   });
 
@@ -54,9 +67,15 @@ export default function PaymentConfigModal({ isOpen, onClose }) {
       setIsLoading(true);
       setSuccessMessage(null);
       setErrorMessage(null);
+      setSmtpTestResult(null);
+
       fetchAdminPaymentConfig()
         .then((data) => {
           if (data) {
+            const initialProvider = data.emailProvider || data.smtpConfig?.provider || 
+              (data.smtpConfig?.apiKey?.startsWith('xkeysib-') ? 'brevo' : 
+               (data.smtpConfig?.apiKey?.startsWith('re_') ? 'resend' : 'brevo'));
+
             setFormData({
               pricePerDay: data.pricePerDay ?? 5.0,
               currency: data.currency || 'USD',
@@ -70,13 +89,18 @@ export default function PaymentConfigModal({ isOpen, onClose }) {
               phone: data.phone || '',
               paymentEmail: data.paymentEmail || '',
               instructions: data.instructions || '',
+              emailProvider: initialProvider,
               smtpConfig: {
-                host: data.smtpConfig?.host || '',
+                provider: initialProvider,
+                apiKey: data.smtpConfig?.apiKey || '',
+                host: data.smtpConfig?.host || 'smtp.gmail.com',
                 port: data.smtpConfig?.port || 587,
                 secure: Boolean(data.smtpConfig?.secure),
                 user: data.smtpConfig?.user || '',
                 pass: data.smtpConfig?.pass || '',
-                from: data.smtpConfig?.from || ''
+                from: data.smtpConfig?.from || '',
+                fromEmail: data.smtpConfig?.fromEmail || data.adminNotificationEmail || '',
+                fromName: data.smtpConfig?.fromName || 'InventariosApp'
               }
             });
           }
@@ -97,7 +121,17 @@ export default function PaymentConfigModal({ isOpen, onClose }) {
     setErrorMessage(null);
 
     try {
-      await updateAdminPaymentConfig(formData);
+      const payload = {
+        ...formData,
+        emailProvider: formData.emailProvider,
+        smtpConfig: {
+          ...formData.smtpConfig,
+          provider: formData.emailProvider,
+          fromEmail: formData.smtpConfig.fromEmail || formData.adminNotificationEmail || formData.smtpConfig.user
+        }
+      };
+
+      await updateAdminPaymentConfig(payload);
       setSuccessMessage('¡Configuración guardada exitosamente en la base de datos!');
       setTimeout(() => setSuccessMessage(null), 3500);
     } catch (err) {
@@ -105,6 +139,41 @@ export default function PaymentConfigModal({ isOpen, onClose }) {
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const handleTestEmail = async () => {
+    setIsTestingSmtp(true);
+    setSmtpTestResult(null);
+    try {
+      const target = formData.adminNotificationEmail || formData.smtpConfig.fromEmail || formData.smtpConfig.user;
+      const res = await testSmtpConnection({
+        ...formData.smtpConfig,
+        provider: formData.emailProvider,
+        fromEmail: formData.smtpConfig.fromEmail || formData.adminNotificationEmail || formData.smtpConfig.user
+      }, target);
+
+      setSmtpTestResult({
+        success: true,
+        message: res.message || '¡Prueba exitosa! Conexión verificada y correo enviado con éxito.'
+      });
+    } catch (err) {
+      setSmtpTestResult({
+        success: false,
+        message: err.message || 'Error al enviar el correo de prueba.'
+      });
+    } finally {
+      setIsTestingSmtp(false);
+    }
+  };
+
+  const isTestReady = () => {
+    if (formData.emailProvider === 'brevo') {
+      return Boolean(formData.smtpConfig.apiKey?.trim());
+    }
+    if (formData.emailProvider === 'resend') {
+      return Boolean(formData.smtpConfig.apiKey?.trim());
+    }
+    return Boolean(formData.smtpConfig.host && formData.smtpConfig.user && formData.smtpConfig.pass);
   };
 
   return (
@@ -124,7 +193,7 @@ export default function PaymentConfigModal({ isOpen, onClose }) {
                 Configuración de Pagos y Notificaciones
               </h3>
               <p className="text-xs text-slate-400">
-                Ajusta las tarifas por día, datos bancarios y correos de aviso
+                Ajusta las tarifas por día, datos bancarios y servicio de correos
               </p>
             </div>
           </div>
@@ -175,7 +244,7 @@ export default function PaymentConfigModal({ isOpen, onClose }) {
             }`}
           >
             <Server className="w-4 h-4" />
-            <span>Servidor SMTP (Opcional)</span>
+            <span>Servidor de Correo</span>
           </button>
         </div>
 
@@ -266,13 +335,23 @@ export default function PaymentConfigModal({ isOpen, onClose }) {
                       <input
                         type="email"
                         value={formData.adminNotificationEmail}
-                        onChange={(e) => setFormData({ ...formData, adminNotificationEmail: e.target.value })}
+                        onChange={(e) => {
+                          const email = e.target.value;
+                          setFormData({ 
+                            ...formData, 
+                            adminNotificationEmail: email,
+                            smtpConfig: {
+                              ...formData.smtpConfig,
+                              fromEmail: formData.smtpConfig.fromEmail || email
+                            }
+                          });
+                        }}
                         placeholder="admin@tuempresa.com"
                         className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white"
                       />
                     </div>
                     <span className="text-[11px] text-slate-400 mt-1 block">
-                      A este correo llegarán los avisos de nuevas solicitudes y los archivos de voucher adjuntos.
+                      A este correo llegarán los avisos de nuevas solicitudes y los comprobantes (vouchers) adjuntos.
                     </span>
                   </div>
                 </div>
@@ -393,208 +472,481 @@ export default function PaymentConfigModal({ isOpen, onClose }) {
                 </div>
               )}
 
-              {/* TAB 3: SMTP EMAIL SERVER */}
+              {/* TAB 3: EMAIL SERVICE (BREVO / RESEND / SMTP) */}
               {activeTab === 'smtp' && (
                 <div className="space-y-4 animate-in fade-in duration-150">
-                  <div className="bg-slate-100 rounded-xl p-3 text-xs text-slate-700">
-                    <p className="font-bold text-slate-900 mb-1">Configuración de Envío Automático (Totalmente Gratis)</p>
-                    <p>
-                      Al configurar tu servidor SMTP, el sistema te enviará un correo con el comprobante adjunto cuando un cliente solicite acceso, y despachará sus credenciales automáticamente al pulsar "Aprobar".
-                    </p>
-                  </div>
-
-                  {/* Provider Quick Presets */}
+                  {/* Selector of email providers */}
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                      Configuración Rápida por Proveedor Gratuito:
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+                      Selecciona el Método de Envío:
                     </label>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                      {/* Option 1: Brevo */}
                       <button
                         type="button"
                         onClick={() => {
                           setFormData({
                             ...formData,
+                            emailProvider: 'brevo',
                             smtpConfig: {
                               ...formData.smtpConfig,
-                              host: 'smtp.gmail.com',
-                              port: 587,
-                              secure: false,
-                              from: formData.smtpConfig.user ? `InventariosApp <${formData.smtpConfig.user}>` : 'InventariosApp'
+                              provider: 'brevo'
                             }
                           });
                         }}
-                        className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all text-center ${
-                          formData.smtpConfig.host === 'smtp.gmail.com'
-                            ? 'bg-indigo-50 border-indigo-300 text-indigo-700 shadow-xs'
+                        className={`p-3 rounded-2xl border text-left transition-all relative flex flex-col justify-between ${
+                          formData.emailProvider === 'brevo'
+                            ? 'bg-indigo-50/90 border-indigo-400 text-indigo-950 shadow-sm ring-2 ring-indigo-500/20'
                             : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
                         }`}
                       >
-                        Gmail
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-bold text-xs flex items-center gap-1.5">
+                            <Zap className="w-3.5 h-3.5 text-indigo-600" />
+                            Brevo API
+                          </span>
+                          <span className="bg-emerald-100 text-emerald-800 text-[10px] font-extrabold px-1.5 py-0.5 rounded-md">
+                            Gratis 300/día
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 leading-tight">
+                          Recomendado para Render (Puerto 443 HTTPS, sin bloqueos).
+                        </p>
                       </button>
 
+                      {/* Option 2: Resend */}
                       <button
                         type="button"
                         onClick={() => {
                           setFormData({
                             ...formData,
+                            emailProvider: 'resend',
                             smtpConfig: {
                               ...formData.smtpConfig,
-                              host: 'smtp-mail.outlook.com',
-                              port: 587,
-                              secure: false,
-                              from: formData.smtpConfig.user ? `InventariosApp <${formData.smtpConfig.user}>` : 'InventariosApp'
+                              provider: 'resend'
                             }
                           });
                         }}
-                        className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all text-center ${
-                          formData.smtpConfig.host === 'smtp-mail.outlook.com'
-                            ? 'bg-indigo-50 border-indigo-300 text-indigo-700 shadow-xs'
+                        className={`p-3 rounded-2xl border text-left transition-all relative flex flex-col justify-between ${
+                          formData.emailProvider === 'resend'
+                            ? 'bg-indigo-50/90 border-indigo-400 text-indigo-950 shadow-sm ring-2 ring-indigo-500/20'
                             : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
                         }`}
                       >
-                        Outlook / Hotmail
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-bold text-xs flex items-center gap-1.5">
+                            <Send className="w-3.5 h-3.5 text-indigo-600" />
+                            Resend API
+                          </span>
+                          <span className="bg-slate-100 text-slate-700 text-[10px] font-bold px-1.5 py-0.5 rounded-md">
+                            100/día
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 leading-tight">
+                          Envío rápido y moderno por API HTTPS.
+                        </p>
                       </button>
 
+                      {/* Option 3: Traditional SMTP */}
                       <button
                         type="button"
                         onClick={() => {
                           setFormData({
                             ...formData,
+                            emailProvider: 'smtp',
                             smtpConfig: {
                               ...formData.smtpConfig,
-                              host: 'smtp-relay.brevo.com',
-                              port: 587,
-                              secure: false
+                              provider: 'smtp'
                             }
                           });
                         }}
-                        className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all text-center ${
-                          formData.smtpConfig.host === 'smtp-relay.brevo.com'
-                            ? 'bg-indigo-50 border-indigo-300 text-indigo-700 shadow-xs'
+                        className={`p-3 rounded-2xl border text-left transition-all relative flex flex-col justify-between ${
+                          formData.emailProvider === 'smtp'
+                            ? 'bg-indigo-50/90 border-indigo-400 text-indigo-950 shadow-sm ring-2 ring-indigo-500/20'
                             : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
                         }`}
                       >
-                        Brevo (Sendinblue)
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-bold text-xs flex items-center gap-1.5">
+                            <Server className="w-3.5 h-3.5 text-indigo-600" />
+                            SMTP Tradicional
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 leading-tight">
+                          Gmail, Outlook o hosting privado (Puertos 587/465).
+                        </p>
                       </button>
                     </div>
                   </div>
 
-                  {/* Gmail Step-by-Step Guide Box */}
-                  {formData.smtpConfig.host === 'smtp.gmail.com' && (
-                    <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3.5 text-xs text-amber-900 space-y-1.5 animate-in fade-in">
-                      <div className="font-bold flex items-center gap-1.5 text-amber-950">
-                        <KeyRound className="w-4 h-4 text-amber-600 shrink-0" />
-                        <span>Cómo obtener tu clave de Gmail en 3 sencillos pasos:</span>
+                  {/* PROVIDER: BREVO (RECOMMENDED FOR RENDER) */}
+                  {formData.emailProvider === 'brevo' && (
+                    <div className="space-y-3.5 animate-in fade-in">
+                      {/* Tutorial Box */}
+                      <div className="bg-gradient-to-br from-indigo-50 to-blue-50/70 border border-indigo-200/80 rounded-2xl p-4 text-xs text-indigo-950 space-y-2">
+                        <div className="flex items-center gap-2 font-bold text-indigo-900 text-sm">
+                          <ShieldCheck className="w-4 h-4 text-indigo-600" />
+                          <span>¿Por qué Brevo es la opción ideal para Render?</span>
+                        </div>
+                        <p className="text-[11.5px] leading-relaxed text-slate-600">
+                          Render bloquea las conexiones salientes por los puertos SMTP tradicionales (587 y 465) en su plan gratuito provocando error de <em>"Connection timeout"</em>. <strong>Brevo envía a través del puerto 443 (HTTPS)</strong>, garantizando que nunca se bloquee y despachando tus correos de inmediato.
+                        </p>
+
+                        <div className="bg-white/80 rounded-xl p-3 border border-indigo-100 text-[11px] space-y-1.5 mt-2">
+                          <p className="font-bold text-indigo-900">Pasos rápidos para activarlo gratis (Sin tarjeta de crédito):</p>
+                          <ol className="list-decimal pl-4 space-y-1 text-slate-700">
+                            <li>
+                              Regístrate o inicia sesión en{' '}
+                              <a 
+                                href="https://app.brevo.com/settings/keys/api" 
+                                target="_blank" 
+                                rel="noreferrer" 
+                                className="font-bold text-indigo-600 hover:underline inline-flex items-center gap-0.5"
+                              >
+                                app.brevo.com/settings/keys/api <ExternalLink className="w-3 h-3" />
+                              </a>
+                            </li>
+                            <li>
+                              Haz clic en <strong>"Generar una nueva clave API"</strong> (o "Generate a new API key"). Copia la clave generada (empieza por <code className="bg-slate-100 px-1 py-0.5 rounded text-indigo-700 font-bold">xkeysib-...</code>).
+                            </li>
+                            <li>
+                              En Brevo ve a{' '}
+                              <a 
+                                href="https://app.brevo.com/senders" 
+                                target="_blank" 
+                                rel="noreferrer" 
+                                className="font-bold text-indigo-600 hover:underline inline-flex items-center gap-0.5"
+                              >
+                                Remitentes e IPs &gt; Remitentes <ExternalLink className="w-3 h-3" />
+                              </a>
+                              {' '}y añade tu correo personal ({formData.adminNotificationEmail || 'tu correo'}). Haz clic en el enlace de confirmación que Brevo te enviará a ese correo.
+                            </li>
+                            <li>
+                              Pega la clave API y tu correo abajo y pulsa <strong>"Probar Conexión"</strong>.
+                            </li>
+                          </ol>
+                        </div>
                       </div>
-                      <ol className="list-decimal pl-4 space-y-1 text-[11px] text-amber-900 leading-relaxed">
-                        <li>
-                          Entra en <a href="https://myaccount.google.com/security" target="_blank" rel="noreferrer" className="font-bold underline text-indigo-700">myaccount.google.com/security</a> y activa la <strong>Verificación en 2 pasos</strong> si no la tienes activa.
-                        </li>
-                        <li>
-                          En la barra de búsqueda de arriba escribe <strong>"Contraseñas de aplicaciones"</strong> (App Passwords).
-                        </li>
-                        <li>
-                          Crea una clave con el nombre <strong>"InventariosApp"</strong>. Google te mostrará un código amarillo de <strong>16 letras</strong>.
-                        </li>
-                        <li>
-                          Pega esas 16 letras en el campo <strong>Contraseña o App Password</strong> aquí abajo (no uses tu clave de login personal).
-                        </li>
-                      </ol>
+
+                      {/* Brevo Inputs */}
+                      <div className="space-y-3">
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                            Clave API de Brevo (API Key) <span className="text-rose-500">*</span>
+                          </label>
+                          <div className="relative">
+                            <input
+                              type={showApiKey ? 'text' : 'password'}
+                              value={formData.smtpConfig.apiKey}
+                              onChange={(e) => setFormData({
+                                ...formData,
+                                smtpConfig: { ...formData.smtpConfig, apiKey: e.target.value.trim() }
+                              })}
+                              placeholder="xkeysib-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                              className="w-full pl-3 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowApiKey(!showApiKey)}
+                              className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600"
+                            >
+                              {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                            </button>
+                          </div>
+                          <span className="text-[11px] text-slate-400 mt-1 block">
+                            Tu clave gratuita de Brevo que inicia con <code className="font-bold">xkeysib-</code>
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs font-bold text-slate-700 mb-1">
+                              Correo Remitente Verificado en Brevo
+                            </label>
+                            <input
+                              type="email"
+                              value={formData.smtpConfig.fromEmail || formData.adminNotificationEmail}
+                              onChange={(e) => setFormData({
+                                ...formData,
+                                smtpConfig: { ...formData.smtpConfig, fromEmail: e.target.value.trim() }
+                              })}
+                              placeholder="victormanuelbuenogrullon@gmail.com"
+                              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white"
+                            />
+                            <span className="text-[10px] text-slate-400 mt-0.5 block">
+                              Debe coincidir con el correo verificado en Brevo &gt; Senders
+                            </span>
+                          </div>
+
+                          <div>
+                            <label className="block text-xs font-bold text-slate-700 mb-1">
+                              Nombre del Remitente
+                            </label>
+                            <input
+                              type="text"
+                              value={formData.smtpConfig.fromName || 'InventariosApp'}
+                              onChange={(e) => setFormData({
+                                ...formData,
+                                smtpConfig: { ...formData.smtpConfig, fromName: e.target.value }
+                              })}
+                              placeholder="InventariosApp"
+                              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white"
+                            />
+                            <span className="text-[10px] text-slate-400 mt-0.5 block">
+                              Nombre que verán los usuarios en su bandeja
+                            </span>
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   )}
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Servidor SMTP (Host)
-                      </label>
-                      <input
-                        type="text"
-                        value={formData.smtpConfig.host}
-                        onChange={(e) => setFormData({
-                          ...formData,
-                          smtpConfig: { ...formData.smtpConfig, host: e.target.value }
-                        })}
-                        placeholder="smtp.gmail.com"
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white"
-                      />
-                    </div>
+                  {/* PROVIDER: RESEND */}
+                  {formData.emailProvider === 'resend' && (
+                    <div className="space-y-3.5 animate-in fade-in">
+                      <div className="bg-purple-50/70 border border-purple-200 rounded-2xl p-4 text-xs text-purple-950 space-y-1.5">
+                        <p className="font-bold text-sm text-purple-900">Envío con Resend API (100 correos/día gratis)</p>
+                        <p className="text-[11.5px] text-purple-800">
+                          Resend ofrece envío inmediato a través de su API HTTP en el puerto 443. Consigue tu clave API en{' '}
+                          <a 
+                            href="https://resend.com/api-keys" 
+                            target="_blank" 
+                            rel="noreferrer" 
+                            className="font-bold underline inline-flex items-center gap-0.5"
+                          >
+                            resend.com/api-keys <ExternalLink className="w-3 h-3" />
+                          </a>
+                        </p>
+                      </div>
 
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Puerto SMTP
-                      </label>
-                      <input
-                        type="number"
-                        value={formData.smtpConfig.port}
-                        onChange={(e) => setFormData({
-                          ...formData,
-                          smtpConfig: { ...formData.smtpConfig, port: parseInt(e.target.value, 10) || 587 }
-                        })}
-                        placeholder="587 o 465"
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white"
-                      />
-                    </div>
+                      <div className="space-y-3">
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                            Clave API de Resend (inicia con re_...)
+                          </label>
+                          <div className="relative">
+                            <input
+                              type={showApiKey ? 'text' : 'password'}
+                              value={formData.smtpConfig.apiKey}
+                              onChange={(e) => setFormData({
+                                ...formData,
+                                smtpConfig: { ...formData.smtpConfig, apiKey: e.target.value.trim() }
+                              })}
+                              placeholder="re_xxxxxxxxxxxxxxxxxxxxxxxxxx"
+                              className="w-full pl-3 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowApiKey(!showApiKey)}
+                              className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600"
+                            >
+                              {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                            </button>
+                          </div>
+                        </div>
 
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Usuario / Correo Electrónico
-                      </label>
-                      <input
-                        type="text"
-                        value={formData.smtpConfig.user}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setFormData({
-                            ...formData,
-                            smtpConfig: { 
-                              ...formData.smtpConfig, 
-                              user: val,
-                              from: formData.smtpConfig.from ? formData.smtpConfig.from : `InventariosApp <${val}>`
-                            }
-                          });
-                        }}
-                        placeholder="tucorreo@gmail.com"
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white"
-                      />
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 mb-1">
+                            Remitente (From)
+                          </label>
+                          <input
+                            type="text"
+                            value={formData.smtpConfig.from || 'InventariosApp <onboarding@resend.dev>'}
+                            onChange={(e) => setFormData({
+                              ...formData,
+                              smtpConfig: { ...formData.smtpConfig, from: e.target.value }
+                            })}
+                            placeholder="InventariosApp <onboarding@resend.dev>"
+                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white"
+                          />
+                        </div>
+                      </div>
                     </div>
+                  )}
 
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Contraseña o App Password
-                      </label>
-                      <input
-                        type="password"
-                        value={formData.smtpConfig.pass}
-                        onChange={(e) => setFormData({
-                          ...formData,
-                          smtpConfig: { ...formData.smtpConfig, pass: e.target.value }
-                        })}
-                        placeholder="Contraseña de aplicación (16 letras)"
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white font-mono"
-                      />
+                  {/* PROVIDER: TRADITIONAL SMTP */}
+                  {formData.emailProvider === 'smtp' && (
+                    <div className="space-y-3.5 animate-in fade-in">
+                      <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3.5 text-xs text-amber-900 space-y-1">
+                        <p className="font-bold flex items-center gap-1.5 text-amber-950">
+                          <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                          <span>Aviso Importante si usas Render Free:</span>
+                        </p>
+                        <p className="text-[11px] text-amber-800 leading-relaxed">
+                          Render bloquea las conexiones salientes por los puertos SMTP (587 y 465) en su nivel gratuito, devolviendo error <strong>"Connection timeout"</strong>. Si tienes ese error, cámbiate a la pestaña <strong>Brevo API</strong> (arriba) que es 100% gratuita y funciona sin bloqueos.
+                        </p>
+                      </div>
+
+                      {/* Presets */}
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1">
+                          Rellenar parámetros de servidor:
+                        </label>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setFormData({
+                                ...formData,
+                                smtpConfig: {
+                                  ...formData.smtpConfig,
+                                  host: 'smtp.gmail.com',
+                                  port: 587,
+                                  secure: false,
+                                  from: formData.smtpConfig.user ? `InventariosApp <${formData.smtpConfig.user}>` : 'InventariosApp'
+                                }
+                              });
+                            }}
+                            className={`py-1.5 px-3 rounded-xl border text-xs font-bold transition-all text-center ${
+                              formData.smtpConfig.host === 'smtp.gmail.com'
+                                ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
+                                : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                            }`}
+                          >
+                            Gmail (smtp.gmail.com)
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setFormData({
+                                ...formData,
+                                smtpConfig: {
+                                  ...formData.smtpConfig,
+                                  host: 'smtp-mail.outlook.com',
+                                  port: 587,
+                                  secure: false,
+                                  from: formData.smtpConfig.user ? `InventariosApp <${formData.smtpConfig.user}>` : 'InventariosApp'
+                                }
+                              });
+                            }}
+                            className={`py-1.5 px-3 rounded-xl border text-xs font-bold transition-all text-center ${
+                              formData.smtpConfig.host === 'smtp-mail.outlook.com'
+                                ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
+                                : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                            }`}
+                          >
+                            Outlook / Hotmail
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Gmail instructions */}
+                      {formData.smtpConfig.host === 'smtp.gmail.com' && (
+                        <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-[11px] text-slate-700 space-y-1">
+                          <p className="font-bold text-slate-900 flex items-center gap-1">
+                            <KeyRound className="w-3.5 h-3.5 text-indigo-600" />
+                            Contraseña de Aplicación de Gmail:
+                          </p>
+                          <p>
+                            En Gmail debes generar una "Contraseña de Aplicación" de 16 caracteres en <a href="https://myaccount.google.com/security" target="_blank" rel="noreferrer" className="underline font-bold text-indigo-600">myaccount.google.com/security</a>. No uses tu clave personal regular.
+                          </p>
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 mb-1">
+                            Servidor SMTP (Host)
+                          </label>
+                          <input
+                            type="text"
+                            value={formData.smtpConfig.host}
+                            onChange={(e) => setFormData({
+                              ...formData,
+                              smtpConfig: { ...formData.smtpConfig, host: e.target.value }
+                            })}
+                            placeholder="smtp.gmail.com"
+                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 mb-1">
+                            Puerto SMTP
+                          </label>
+                          <input
+                            type="number"
+                            value={formData.smtpConfig.port}
+                            onChange={(e) => setFormData({
+                              ...formData,
+                              smtpConfig: { ...formData.smtpConfig, port: parseInt(e.target.value, 10) || 587 }
+                            })}
+                            placeholder="587 o 465"
+                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 mb-1">
+                            Usuario / Correo Electrónico
+                          </label>
+                          <input
+                            type="text"
+                            value={formData.smtpConfig.user}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setFormData({
+                                ...formData,
+                                smtpConfig: { 
+                                  ...formData.smtpConfig, 
+                                  user: val,
+                                  from: formData.smtpConfig.from ? formData.smtpConfig.from : `InventariosApp <${val}>`
+                                }
+                              });
+                            }}
+                            placeholder="tucorreo@gmail.com"
+                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 mb-1">
+                            Contraseña o App Password
+                          </label>
+                          <div className="relative">
+                            <input
+                              type={showSmtpPass ? 'text' : 'password'}
+                              value={formData.smtpConfig.pass}
+                              onChange={(e) => setFormData({
+                                ...formData,
+                                smtpConfig: { ...formData.smtpConfig, pass: e.target.value }
+                              })}
+                              placeholder="16 letras de Google"
+                              className="w-full pl-3 pr-10 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowSmtpPass(!showSmtpPass)}
+                              className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600"
+                            >
+                              {showSmtpPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="sm:col-span-2">
+                          <label className="block text-xs font-bold text-slate-700 mb-1">
+                            Remitente (From)
+                          </label>
+                          <input
+                            type="text"
+                            value={formData.smtpConfig.from}
+                            onChange={(e) => setFormData({
+                              ...formData,
+                              smtpConfig: { ...formData.smtpConfig, from: e.target.value }
+                            })}
+                            placeholder="InventariosApp <tucorreo@gmail.com>"
+                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white"
+                          />
+                        </div>
+                      </div>
                     </div>
+                  )}
 
-                    <div className="sm:col-span-2">
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Remitente (From)
-                      </label>
-                      <input
-                        type="text"
-                        value={formData.smtpConfig.from}
-                        onChange={(e) => setFormData({
-                          ...formData,
-                          smtpConfig: { ...formData.smtpConfig, from: e.target.value }
-                        })}
-                        placeholder="InventariosApp <tucorreo@gmail.com>"
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Test SMTP Result Banner */}
+                  {/* Test Result Message */}
                   {smtpTestResult && (
-                    <div className={`p-3.5 rounded-xl border text-xs flex items-start gap-2.5 animate-in fade-in ${
+                    <div className={`p-3.5 rounded-2xl border text-xs flex items-start gap-2.5 animate-in fade-in ${
                       smtpTestResult.success 
                         ? 'bg-emerald-50 border-emerald-200 text-emerald-900' 
                         : 'bg-rose-50 border-rose-200 text-rose-900'
@@ -604,44 +956,24 @@ export default function PaymentConfigModal({ isOpen, onClose }) {
                       ) : (
                         <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
                       )}
-                      <div className="flex-1 font-semibold leading-relaxed">
+                      <div className="flex-1 font-medium leading-relaxed">
                         {smtpTestResult.message}
                       </div>
                     </div>
                   )}
 
                   {/* Test Button */}
-                  <div className="pt-1 flex items-center justify-between">
+                  <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-2 border-t border-slate-100">
                     <button
                       type="button"
-                      disabled={isTestingSmtp || !formData.smtpConfig.host || !formData.smtpConfig.user || !formData.smtpConfig.pass}
-                      onClick={async () => {
-                        setIsTestingSmtp(true);
-                        setSmtpTestResult(null);
-                        try {
-                          const res = await testSmtpConnection(
-                            formData.smtpConfig, 
-                            formData.adminNotificationEmail || formData.smtpConfig.user
-                          );
-                          setSmtpTestResult({
-                            success: true,
-                            message: res.message || '¡Prueba exitosa! Conexión verificada y correo de prueba enviado.'
-                          });
-                        } catch (err) {
-                          setSmtpTestResult({
-                            success: false,
-                            message: err.message || 'Error al conectar con el servidor SMTP.'
-                          });
-                        } finally {
-                          setIsTestingSmtp(false);
-                        }
-                      }}
-                      className="py-2.5 px-4 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-2 disabled:opacity-40 cursor-pointer"
+                      disabled={isTestingSmtp || !isTestReady()}
+                      onClick={handleTestEmail}
+                      className="w-full sm:w-auto py-2.5 px-4 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-2 disabled:opacity-40 cursor-pointer"
                     >
                       {isTestingSmtp ? (
                         <>
                           <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
-                          <span>Verificando conexión SMTP y enviando correo...</span>
+                          <span>Enviando correo de prueba...</span>
                         </>
                       ) : (
                         <>
@@ -650,8 +982,11 @@ export default function PaymentConfigModal({ isOpen, onClose }) {
                         </>
                       )}
                     </button>
-                    <span className="text-[10px] text-slate-400">
-                      Se enviará al correo de notificación
+                    <span className="text-[10px] text-slate-400 text-center sm:text-right">
+                      Destino:{' '}
+                      <strong className="text-slate-600 font-mono">
+                        {formData.adminNotificationEmail || formData.smtpConfig.fromEmail || formData.smtpConfig.user || 'admin'}
+                      </strong>
                     </span>
                   </div>
                 </div>
