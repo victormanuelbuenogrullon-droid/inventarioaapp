@@ -147,14 +147,14 @@ const DEFAULT_PAYMENT_CONFIG = {
   currency: 'USD',
   currencySymbol: '$',
   adminNotificationEmail: process.env.ADMIN_EMAIL || '',
-  bankName: 'Banco Nacional / Transferencia / Zelle',
-  accountType: 'Cuenta Corriente',
-  accountNumber: '0102-0000-00-0000000000',
-  accountHolder: 'InventariosApp',
-  idNumber: 'J-12345678-0',
-  phone: '+1 (555) 123-4567',
-  paymentEmail: 'pagos@inventariosapp.com',
-  instructions: 'Por favor realiza el pago o transferencia por el monto exacto calculado para los días solicitados. Luego sube tu comprobante (captura o PDF) para que el Administrador procese tu acceso.',
+  bankName: '',
+  accountType: '',
+  accountNumber: '',
+  accountHolder: '',
+  idNumber: '',
+  phone: '',
+  paymentEmail: '',
+  instructions: '',
   emailProvider: 'brevo', // 'brevo' | 'resend' | 'smtp'
   smtpConfig: {
     provider: 'brevo',
@@ -169,6 +169,21 @@ const DEFAULT_PAYMENT_CONFIG = {
     fromName: 'InventariosApp'
   }
 };
+
+function cleanDummyPaymentConfig(cfg) {
+  if (!cfg || typeof cfg !== 'object') return cfg;
+  if (cfg.bankName === 'Banco Nacional / Transferencia / Zelle') cfg.bankName = '';
+  if (cfg.accountType === 'Cuenta Corriente') cfg.accountType = '';
+  if (cfg.accountNumber === '0102-0000-00-0000000000') cfg.accountNumber = '';
+  if (cfg.accountHolder === 'InventariosApp') cfg.accountHolder = '';
+  if (cfg.idNumber === 'J-12345678-0') cfg.idNumber = '';
+  if (cfg.phone === '+1 (555) 123-4567') cfg.phone = '';
+  if (cfg.paymentEmail === 'pagos@inventariosapp.com') cfg.paymentEmail = '';
+  if (typeof cfg.instructions === 'string' && cfg.instructions.includes('Por favor realiza el pago o transferencia por el monto exacto')) {
+    cfg.instructions = '';
+  }
+  return cfg;
+}
 
 let sharedPaymentConfig = { ...DEFAULT_PAYMENT_CONFIG };
 let sharedAccessRequests = [];
@@ -398,6 +413,7 @@ function loadPaymentConfigFromDisk() {
         sharedPaymentConfig = { ...DEFAULT_PAYMENT_CONFIG, ...parsed };
       }
     }
+    cleanDummyPaymentConfig(sharedPaymentConfig);
   } catch (err) {
     console.error('[Payment] Error cargando config desde disco:', err);
   }
@@ -2580,6 +2596,7 @@ async function startServer() {
       const dbPayment = await dbLoadPaymentConfig();
       if (dbPayment && typeof dbPayment === 'object') {
         sharedPaymentConfig = { ...DEFAULT_PAYMENT_CONFIG, ...dbPayment };
+        cleanDummyPaymentConfig(sharedPaymentConfig);
         console.log(`[Database] ✅ Configuración de pagos cargada desde PostgreSQL. Tarifa: ${sharedPaymentConfig.pricePerDay} ${sharedPaymentConfig.currency}/día.`);
       }
 

@@ -373,7 +373,7 @@ export default function PaymentConfigModal({ isOpen, onClose }) {
                         type="text"
                         value={formData.bankName}
                         onChange={(e) => setFormData({ ...formData, bankName: e.target.value })}
-                        placeholder="ej. Banesco / Chase / Zelle"
+                        placeholder="Banco o método de transferencia"
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white"
                       />
                     </div>
@@ -386,7 +386,7 @@ export default function PaymentConfigModal({ isOpen, onClose }) {
                         type="text"
                         value={formData.accountType}
                         onChange={(e) => setFormData({ ...formData, accountType: e.target.value })}
-                        placeholder="ej. Corriente / Ahorros / Zelle"
+                        placeholder="Tipo de cuenta (opcional)"
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white"
                       />
                     </div>
@@ -399,7 +399,7 @@ export default function PaymentConfigModal({ isOpen, onClose }) {
                         type="text"
                         value={formData.accountNumber}
                         onChange={(e) => setFormData({ ...formData, accountNumber: e.target.value })}
-                        placeholder="ej. 0134-XXXX-XXXX-XXXX o usuario Zelle"
+                        placeholder="Número de cuenta o usuario de pago"
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white"
                       />
                     </div>
@@ -412,7 +412,7 @@ export default function PaymentConfigModal({ isOpen, onClose }) {
                         type="text"
                         value={formData.accountHolder}
                         onChange={(e) => setFormData({ ...formData, accountHolder: e.target.value })}
-                        placeholder="ej. Nombre de la empresa o persona"
+                        placeholder="Nombre del titular o razón social"
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white"
                       />
                     </div>
@@ -425,7 +425,7 @@ export default function PaymentConfigModal({ isOpen, onClose }) {
                         type="text"
                         value={formData.idNumber}
                         onChange={(e) => setFormData({ ...formData, idNumber: e.target.value })}
-                        placeholder="ej. J-12345678-0"
+                        placeholder="Identificación fiscal o personal"
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white"
                       />
                     </div>
@@ -438,7 +438,7 @@ export default function PaymentConfigModal({ isOpen, onClose }) {
                         type="text"
                         value={formData.phone}
                         onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                        placeholder="ej. +58 412 1234567"
+                        placeholder="Teléfono para pagos móviles"
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white"
                       />
                     </div>
@@ -451,7 +451,7 @@ export default function PaymentConfigModal({ isOpen, onClose }) {
                         type="email"
                         value={formData.paymentEmail}
                         onChange={(e) => setFormData({ ...formData, paymentEmail: e.target.value })}
-                        placeholder="ej. pagos@tuempresa.com"
+                        placeholder="Correo electrónico de pago"
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white"
                       />
                     </div>
@@ -464,7 +464,7 @@ export default function PaymentConfigModal({ isOpen, onClose }) {
                         rows={2}
                         value={formData.instructions}
                         onChange={(e) => setFormData({ ...formData, instructions: e.target.value })}
-                        placeholder="ej. Coloca tu correo en el concepto y sube una captura legible del comprobante."
+                        placeholder="Instrucciones adicionales para los solicitantes..."
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white"
                       />
                     </div>

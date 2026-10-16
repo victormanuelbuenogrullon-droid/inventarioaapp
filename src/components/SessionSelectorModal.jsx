@@ -118,7 +118,7 @@ export default function SessionSelectorModal({
   const handleValidateCode = async (e) => {
     e?.preventDefault();
     if (!joinCode.trim()) {
-      setErrorMessage('Ingresa el código de sesión (ej: INV-8492)');
+      setErrorMessage('Ingresa el código de sesión');
       return;
     }
 
@@ -289,7 +289,7 @@ export default function SessionSelectorModal({
                   Crea tu propio conteo aislado
                 </p>
                 <p className="leading-relaxed">
-                  Al crear la sesión se generará automáticamente un <strong>Código de Sesión único (ej. INV-8492)</strong>.
+                  Al crear la sesión se generará automáticamente un <strong>Código de Sesión único</strong>.
                   Tus auxiliares o colaboradores podrán unirse ingresando ese código.
                 </p>
                 <div className="pt-2 border-t border-slate-200 text-[11px] text-indigo-700 font-semibold">
@@ -306,7 +306,7 @@ export default function SessionSelectorModal({
                   required
                   value={newSessionName}
                   onChange={(e) => setNewSessionName(e.target.value)}
-                  placeholder="ej. Sucursal Principal - Conteo Octubre"
+                  placeholder="Nombre de la sesión o área de conteo"
                   className="w-full px-3.5 py-2.5 bg-slate-50 hover:bg-slate-50/80 focus:bg-white border border-slate-300 rounded-xl text-sm font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all"
                 />
               </div>
@@ -360,7 +360,7 @@ export default function SessionSelectorModal({
                         setJoinCode(e.target.value.toUpperCase());
                         setValidatedSession(null);
                       }}
-                      placeholder="ej. INV-8492"
+                      placeholder="Código de sesión"
                       required
                       className="w-full pl-10 pr-3.5 py-2.5 bg-slate-50 hover:bg-slate-50/80 focus:bg-white border border-slate-300 rounded-xl text-sm font-mono font-bold uppercase text-indigo-700 tracking-wider focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all"
                     />

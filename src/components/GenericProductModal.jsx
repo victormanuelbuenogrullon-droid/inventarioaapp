@@ -136,7 +136,7 @@ export default function GenericProductModal({
               type="text"
               value={codigo}
               onChange={(e) => setCodigo(e.target.value)}
-              placeholder="Ej: 7501234567890 o GEN-001"
+              placeholder="Código de barras o SKU"
               className="w-full px-3.5 py-2.5 bg-slate-50 text-slate-900 placeholder-slate-400 rounded-xl border border-slate-300 focus:border-slate-800 focus:outline-none font-mono text-xs"
             />
           </div>
@@ -152,7 +152,7 @@ export default function GenericProductModal({
               required
               value={descripcion}
               onChange={(e) => setDescripcion(e.target.value)}
-              placeholder="Ej: PAN INTEGRAL ARTESANAL"
+              placeholder="Descripción del producto"
               className="w-full px-3.5 py-2.5 bg-slate-50 text-slate-900 font-bold placeholder-slate-400 rounded-xl border border-slate-300 focus:border-slate-800 focus:outline-none text-sm uppercase"
             />
           </div>

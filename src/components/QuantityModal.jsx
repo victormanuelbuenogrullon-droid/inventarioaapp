@@ -218,7 +218,7 @@ export default function QuantityModal({
                     type="text"
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
-                    placeholder="Ej: ARROZ SELECTO 10 LBS"
+                    placeholder="Descripción del producto"
                     className="w-full px-3 py-1.5 bg-white text-slate-900 font-semibold rounded-lg border border-slate-300 focus:border-indigo-600 focus:outline-none text-xs uppercase"
                   />
                 </div>

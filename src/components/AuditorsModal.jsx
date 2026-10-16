@@ -63,7 +63,7 @@ export default function AuditorsModal({
                 type="text"
                 value={nameInput}
                 onChange={(e) => setNameInput(e.target.value)}
-                placeholder="Ej: Juan - Pasillo 1 / Pistola 2"
+                placeholder="Nombre del auditor o estación"
                 className="flex-1 px-3.5 py-2 bg-slate-50 text-slate-900 placeholder-slate-400 rounded-xl border border-slate-300 focus:border-slate-800 focus:outline-none text-xs font-medium"
               />
               <button

@@ -16,14 +16,14 @@ export async function fetchPublicPaymentConfig() {
       pricePerDay: 5.0,
       currency: 'USD',
       currencySymbol: '$',
-      bankName: 'Transferencia Bancaria / Zelle',
-      accountType: 'Cuenta Corriente',
+      bankName: '',
+      accountType: '',
       accountNumber: '',
       accountHolder: '',
       idNumber: '',
       phone: '',
       paymentEmail: '',
-      instructions: 'Realiza tu pago por el monto exacto y adjunta tu comprobante.'
+      instructions: ''
     };
   }
 }

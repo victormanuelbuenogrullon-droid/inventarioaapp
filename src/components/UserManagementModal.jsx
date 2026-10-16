@@ -406,7 +406,7 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
                   type="text"
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
-                  placeholder="Ej: Juan Pérez"
+                  placeholder="Nombre completo"
                   required
                   className="w-full px-3.5 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 />
@@ -420,7 +420,7 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
                   type="text"
                   value={newUsername}
                   onChange={(e) => setNewUsername(e.target.value.toLowerCase().replace(/\s+/g, ''))}
-                  placeholder="Ej: juanperez"
+                  placeholder="Nombre de usuario"
                   required
                   className="w-full px-3.5 py-2 border border-slate-200 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 />
@@ -493,7 +493,7 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
                     max="365"
                     value={newAccessDays === 0 ? '' : newAccessDays}
                     onChange={(e) => setNewAccessDays(e.target.value === '' ? 0 : Math.max(1, parseInt(e.target.value, 10) || 0))}
-                    placeholder="Ej: 45"
+                    placeholder="Días"
                     className="w-20 px-2 py-1 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-bold bg-white text-slate-800"
                   />
                   <span>días</span>
@@ -679,7 +679,7 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
                       max="365"
                       value={selectedExtendDays === 0 ? '' : selectedExtendDays}
                       onChange={(e) => setSelectedExtendDays(e.target.value === '' ? 0 : Math.max(1, parseInt(e.target.value, 10) || 0))}
-                      placeholder="Ej: 60"
+                      placeholder="Días"
                       className="w-20 px-2.5 py-1 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 font-bold"
                     />
                     <span className="text-xs text-slate-500">días</span>

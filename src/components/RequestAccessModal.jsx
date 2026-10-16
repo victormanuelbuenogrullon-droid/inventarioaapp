@@ -311,6 +311,12 @@ export default function RequestAccessModal({ isOpen, onClose }) {
                     <Loader2 className="w-4 h-4 animate-spin text-indigo-500" />
                     <span>Cargando datos bancarios...</span>
                   </div>
+                ) : !(config.bankName || config.accountType || config.accountNumber || config.accountHolder || config.idNumber || config.phone || config.paymentEmail) ? (
+                  <div className="p-3.5 text-center text-slate-500 text-xs bg-slate-50 border border-slate-100 rounded-xl">
+                    <p className="font-medium text-slate-600">
+                      El Administrador indicará los datos bancarios para la transferencia. Sube tu comprobante de pago una vez realizado el depósito o transferencia.
+                    </p>
+                  </div>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                     {config.bankName && (

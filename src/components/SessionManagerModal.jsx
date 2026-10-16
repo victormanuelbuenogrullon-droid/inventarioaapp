@@ -330,7 +330,7 @@ export default function SessionManagerModal({
                   required
                   value={saveName}
                   onChange={(e) => setSaveName(e.target.value)}
-                  placeholder="Ej: Pasillo 1 - Lácteos / Conteo Octubre"
+                  placeholder="Nombre descriptivo de la sesión"
                   className="w-full px-3.5 py-2.5 bg-slate-50 text-slate-900 placeholder-slate-400 rounded-xl border border-slate-300 focus:border-slate-800 focus:outline-none text-xs font-semibold"
                 />
               </div>
@@ -344,7 +344,7 @@ export default function SessionManagerModal({
                   type="text"
                   value={saveNote}
                   onChange={(e) => setSaveNote(e.target.value)}
-                  placeholder="Ej: Conteo parcial hasta la sección de harinas"
+                  placeholder="Observaciones de la sesión..."
                   className="w-full px-3.5 py-2.5 bg-slate-50 text-slate-800 placeholder-slate-400 rounded-xl border border-slate-300 focus:border-slate-800 focus:outline-none text-xs"
                 />
               </div>
