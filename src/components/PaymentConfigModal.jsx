@@ -14,12 +14,14 @@ import {
   KeyRound,
   FileText
 } from 'lucide-react';
-import { fetchAdminPaymentConfig, updateAdminPaymentConfig } from '../utils/payment';
+import { fetchAdminPaymentConfig, updateAdminPaymentConfig, testSmtpConnection } from '../utils/payment';
 
 export default function PaymentConfigModal({ isOpen, onClose }) {
   const [activeTab, setActiveTab] = useState('general'); // 'general' | 'banking' | 'smtp'
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isTestingSmtp, setIsTestingSmtp] = useState(false);
+  const [smtpTestResult, setSmtpTestResult] = useState(null);
   const [successMessage, setSuccessMessage] = useState(null);
   const [errorMessage, setErrorMessage] = useState(null);
 
@@ -393,13 +395,113 @@ export default function PaymentConfigModal({ isOpen, onClose }) {
 
               {/* TAB 3: SMTP EMAIL SERVER */}
               {activeTab === 'smtp' && (
-                <div className="space-y-3.5 animate-in fade-in duration-150">
+                <div className="space-y-4 animate-in fade-in duration-150">
                   <div className="bg-slate-100 rounded-xl p-3 text-xs text-slate-700">
-                    <p className="font-bold text-slate-900 mb-1">Configuración de Envío Automático (Opcional)</p>
+                    <p className="font-bold text-slate-900 mb-1">Configuración de Envío Automático (Totalmente Gratis)</p>
                     <p>
-                      Si configuras tu servidor de correo saliente (SMTP), el sistema enviará automáticamente un correo al administrador con el comprobante adjunto, y enviará las credenciales al usuario al hacer clic en "Aprobar". Si no lo configuras, igualmente podrás ver todas las solicitudes y comprobantes en el panel de la aplicación.
+                      Al configurar tu servidor SMTP, el sistema te enviará un correo con el comprobante adjunto cuando un cliente solicite acceso, y despachará sus credenciales automáticamente al pulsar "Aprobar".
                     </p>
                   </div>
+
+                  {/* Provider Quick Presets */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                      Configuración Rápida por Proveedor Gratuito:
+                    </label>
+                    <div className="grid grid-cols-3 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFormData({
+                            ...formData,
+                            smtpConfig: {
+                              ...formData.smtpConfig,
+                              host: 'smtp.gmail.com',
+                              port: 587,
+                              secure: false,
+                              from: formData.smtpConfig.user ? `InventariosApp <${formData.smtpConfig.user}>` : 'InventariosApp'
+                            }
+                          });
+                        }}
+                        className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all text-center ${
+                          formData.smtpConfig.host === 'smtp.gmail.com'
+                            ? 'bg-indigo-50 border-indigo-300 text-indigo-700 shadow-xs'
+                            : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                        }`}
+                      >
+                        Gmail
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFormData({
+                            ...formData,
+                            smtpConfig: {
+                              ...formData.smtpConfig,
+                              host: 'smtp-mail.outlook.com',
+                              port: 587,
+                              secure: false,
+                              from: formData.smtpConfig.user ? `InventariosApp <${formData.smtpConfig.user}>` : 'InventariosApp'
+                            }
+                          });
+                        }}
+                        className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all text-center ${
+                          formData.smtpConfig.host === 'smtp-mail.outlook.com'
+                            ? 'bg-indigo-50 border-indigo-300 text-indigo-700 shadow-xs'
+                            : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                        }`}
+                      >
+                        Outlook / Hotmail
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFormData({
+                            ...formData,
+                            smtpConfig: {
+                              ...formData.smtpConfig,
+                              host: 'smtp-relay.brevo.com',
+                              port: 587,
+                              secure: false
+                            }
+                          });
+                        }}
+                        className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all text-center ${
+                          formData.smtpConfig.host === 'smtp-relay.brevo.com'
+                            ? 'bg-indigo-50 border-indigo-300 text-indigo-700 shadow-xs'
+                            : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                        }`}
+                      >
+                        Brevo (Sendinblue)
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Gmail Step-by-Step Guide Box */}
+                  {formData.smtpConfig.host === 'smtp.gmail.com' && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3.5 text-xs text-amber-900 space-y-1.5 animate-in fade-in">
+                      <div className="font-bold flex items-center gap-1.5 text-amber-950">
+                        <KeyRound className="w-4 h-4 text-amber-600 shrink-0" />
+                        <span>Cómo obtener tu clave de Gmail en 3 sencillos pasos:</span>
+                      </div>
+                      <ol className="list-decimal pl-4 space-y-1 text-[11px] text-amber-900 leading-relaxed">
+                        <li>
+                          Entra en <a href="https://myaccount.google.com/security" target="_blank" rel="noreferrer" className="font-bold underline text-indigo-700">myaccount.google.com/security</a> y activa la <strong>Verificación en 2 pasos</strong> si no la tienes activa.
+                        </li>
+                        <li>
+                          En la barra de búsqueda de arriba escribe <strong>"Contraseñas de aplicaciones"</strong> (App Passwords).
+                        </li>
+                        <li>
+                          Crea una clave con el nombre <strong>"InventariosApp"</strong>. Google te mostrará un código amarillo de <strong>16 letras</strong>.
+                        </li>
+                        <li>
+                          Pega esas 16 letras en el campo <strong>Contraseña o App Password</strong> aquí abajo (no uses tu clave de login personal).
+                        </li>
+                      </ol>
+                    </div>
+                  )}
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
@@ -436,16 +538,23 @@ export default function PaymentConfigModal({ isOpen, onClose }) {
 
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Usuario / Correo SMTP
+                        Usuario / Correo Electrónico
                       </label>
                       <input
                         type="text"
                         value={formData.smtpConfig.user}
-                        onChange={(e) => setFormData({
-                          ...formData,
-                          smtpConfig: { ...formData.smtpConfig, user: e.target.value }
-                        })}
-                        placeholder="tucuenta@gmail.com"
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setFormData({
+                            ...formData,
+                            smtpConfig: { 
+                              ...formData.smtpConfig, 
+                              user: val,
+                              from: formData.smtpConfig.from ? formData.smtpConfig.from : `InventariosApp <${val}>`
+                            }
+                          });
+                        }}
+                        placeholder="tucorreo@gmail.com"
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white"
                       />
                     </div>
@@ -461,8 +570,8 @@ export default function PaymentConfigModal({ isOpen, onClose }) {
                           ...formData,
                           smtpConfig: { ...formData.smtpConfig, pass: e.target.value }
                         })}
-                        placeholder="••••••••••••••••"
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white"
+                        placeholder="Contraseña de aplicación (16 letras)"
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white font-mono"
                       />
                     </div>
 
@@ -477,10 +586,73 @@ export default function PaymentConfigModal({ isOpen, onClose }) {
                           ...formData,
                           smtpConfig: { ...formData.smtpConfig, from: e.target.value }
                         })}
-                        placeholder="InventariosApp <notificaciones@tuempresa.com>"
+                        placeholder="InventariosApp <tucorreo@gmail.com>"
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white"
                       />
                     </div>
+                  </div>
+
+                  {/* Test SMTP Result Banner */}
+                  {smtpTestResult && (
+                    <div className={`p-3.5 rounded-xl border text-xs flex items-start gap-2.5 animate-in fade-in ${
+                      smtpTestResult.success 
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-900' 
+                        : 'bg-rose-50 border-rose-200 text-rose-900'
+                    }`}>
+                      {smtpTestResult.success ? (
+                        <Check className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                      ) : (
+                        <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                      )}
+                      <div className="flex-1 font-semibold leading-relaxed">
+                        {smtpTestResult.message}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Test Button */}
+                  <div className="pt-1 flex items-center justify-between">
+                    <button
+                      type="button"
+                      disabled={isTestingSmtp || !formData.smtpConfig.host || !formData.smtpConfig.user || !formData.smtpConfig.pass}
+                      onClick={async () => {
+                        setIsTestingSmtp(true);
+                        setSmtpTestResult(null);
+                        try {
+                          const res = await testSmtpConnection(
+                            formData.smtpConfig, 
+                            formData.adminNotificationEmail || formData.smtpConfig.user
+                          );
+                          setSmtpTestResult({
+                            success: true,
+                            message: res.message || '¡Prueba exitosa! Conexión verificada y correo de prueba enviado.'
+                          });
+                        } catch (err) {
+                          setSmtpTestResult({
+                            success: false,
+                            message: err.message || 'Error al conectar con el servidor SMTP.'
+                          });
+                        } finally {
+                          setIsTestingSmtp(false);
+                        }
+                      }}
+                      className="py-2.5 px-4 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-2 disabled:opacity-40 cursor-pointer"
+                    >
+                      {isTestingSmtp ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
+                          <span>Verificando conexión SMTP y enviando correo...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Mail className="w-4 h-4 text-indigo-400" />
+                          <span>Probar Conexión y Enviar Correo de Prueba</span>
+                        </>
+                      )}
+                    </button>
+                    <span className="text-[10px] text-slate-400">
+                      Se enviará al correo de notificación
+                    </span>
                   </div>
                 </div>
               )}

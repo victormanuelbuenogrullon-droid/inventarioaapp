@@ -176,3 +176,27 @@ export async function deleteAccessRequest(id) {
 
   return data;
 }
+
+/**
+ * Admin: Test SMTP configuration by sending a verification email
+ */
+export async function testSmtpConnection(smtpConfig, targetEmail) {
+  const token = getStoredToken();
+  const baseUrl = getServerBaseUrl();
+  const res = await fetch(`${baseUrl}/api/admin/payment-config/test-smtp`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    },
+    body: JSON.stringify({ smtpConfig, targetEmail })
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || 'Error en la prueba de conexión SMTP');
+  }
+
+  return data;
+}
+

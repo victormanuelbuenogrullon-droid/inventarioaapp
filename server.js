@@ -1098,6 +1098,71 @@ app.put('/api/admin/payment-config', requireAdmin, async (req, res) => {
   }
 });
 
+// Admin: Test SMTP configuration by sending a verification email
+app.post('/api/admin/payment-config/test-smtp', requireAdmin, async (req, res) => {
+  try {
+    const { smtpConfig, targetEmail } = req.body || {};
+    const effectiveSmtp = smtpConfig || sharedPaymentConfig.smtpConfig;
+    const recipient = targetEmail || sharedPaymentConfig.adminNotificationEmail || req.user.username;
+
+    if (!effectiveSmtp?.host || !effectiveSmtp?.user || !effectiveSmtp?.pass) {
+      return res.status(400).json({ error: 'Debes completar el Servidor (Host), Usuario y Contraseña SMTP.' });
+    }
+
+    if (!recipient || !recipient.includes('@')) {
+      return res.status(400).json({ error: 'Debes especificar un correo de destino válido para recibir la prueba.' });
+    }
+
+    const transporter = createTransporter(effectiveSmtp);
+    if (!transporter) {
+      return res.status(400).json({ error: 'No se pudo inicializar la conexión con los datos provistos.' });
+    }
+
+    const fromAddress = effectiveSmtp.from || effectiveSmtp.user;
+
+    const info = await transporter.sendMail({
+      from: `"InventariosApp Verificación" <${fromAddress}>`,
+      to: recipient,
+      subject: `✅ Correo de Prueba Exitoso - InventariosApp`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 550px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 14px; background-color: #ffffff;">
+          <div style="background-color: #10b981; padding: 14px; border-radius: 10px; margin-bottom: 20px; text-align: center;">
+            <h2 style="color: #ffffff; margin: 0; font-size: 18px;">🎉 ¡Conexión SMTP Exitosa!</h2>
+          </div>
+          <p style="font-size: 14px; color: #334155;">Hola Administrador,</p>
+          <p style="font-size: 14px; color: #334155;">Este es un mensaje de prueba para verificar que tu servidor SMTP funciona a la perfección en <strong>InventariosApp</strong>.</p>
+          
+          <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 14px; margin: 18px 0; font-size: 13px;">
+            <p style="margin: 4px 0;"><strong>Servidor:</strong> ${effectiveSmtp.host}:${effectiveSmtp.port}</p>
+            <p style="margin: 4px 0;"><strong>Remitente:</strong> ${fromAddress}</p>
+            <p style="margin: 4px 0;"><strong>Destinatario de prueba:</strong> ${recipient}</p>
+          </div>
+          
+          <p style="font-size: 13px; color: #64748b;">
+            A partir de ahora, cada vez que un usuario solicite acceso recibirás el comprobante (voucher) adjunto en tu correo, y al aprobar su solicitud el sistema le enviará sus credenciales automáticamente.
+          </p>
+        </div>
+      `
+    });
+
+    console.log(`[SMTP Test] Correo de prueba enviado exitosamente a ${recipient} (id: ${info.messageId})`);
+    res.json({
+      success: true,
+      message: `¡Correo de prueba enviado con éxito a ${recipient}! Revisa tu bandeja de entrada o spam.`,
+      messageId: info.messageId
+    });
+  } catch (err) {
+    console.error('[SMTP Test] Error en prueba de correo:', err);
+    let friendlyError = err.message || 'Error al conectar con el servidor SMTP';
+    if (friendlyError.includes('EAUTH') || friendlyError.includes('Invalid login') || friendlyError.includes('Username and Password not accepted')) {
+      friendlyError = 'Error de autenticación: El usuario o contraseña no es correcto. En Gmail, debes generar una "Contraseña de Aplicación" de 16 caracteres desde la configuración de seguridad de Google.';
+    } else if (friendlyError.includes('ETIMEDOUT') || friendlyError.includes('ESOCKET') || friendlyError.includes('ECONNREFUSED')) {
+      friendlyError = 'No se pudo conectar al servidor SMTP. Verifica el Servidor (ej. smtp.gmail.com) y el Puerto (587 o 465).';
+    }
+    res.status(500).json({ error: friendlyError });
+  }
+});
+
 // Admin: Approve access request & generate credentials
 app.put('/api/admin/access-requests/:id/approve', requireAdmin, async (req, res) => {
   const { id } = req.params;
