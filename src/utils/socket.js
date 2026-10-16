@@ -272,35 +272,60 @@ export function setActiveSessionCode(code) {
 export function getSocket() {
   if (!socket) {
     const serverUrl = getServerBaseUrl();
-    const token = localStorage.getItem('inventariosapp_token_v1');
-    const sessionCode = getActiveSessionCode();
 
     socket = io(serverUrl, {
-      auth: { token, sessionCode },
-      transports: ['websocket', 'polling'],
+      auth: (cb) => {
+        cb({
+          token: localStorage.getItem('inventariosapp_token_v1'),
+          sessionCode: getActiveSessionCode()
+        });
+      },
+      transports: ['polling', 'websocket'],
+      upgrade: true,
       reconnection: true,
       reconnectionAttempts: Infinity,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
-      timeout: 20000,
+      reconnectionDelay: 800,
+      reconnectionDelayMax: 3000,
+      timeout: 10000,
     });
 
-    socket.on('connect', () => {
-      console.log('🟢 [Socket] Conectado en tiempo real al servidor:', socket.id);
+    const joinCurrentSession = () => {
       const activeCode = getActiveSessionCode();
       const userName = localStorage.getItem('inventariosapp_auditor_name');
       if (activeCode) {
         socket.emit('session:join', { sessionCode: activeCode, userName });
       }
+    };
+
+    socket.on('connect', () => {
+      console.log('🟢 [Socket] Conectado en tiempo real al servidor:', socket.id);
+      joinCurrentSession();
     });
+
+    if (socket.io) {
+      socket.io.on('reconnect', (attempt) => {
+        console.log('🔄 [Socket] Reconexión exitosa al servidor tras intento', attempt);
+        joinCurrentSession();
+      });
+    }
 
     socket.on('disconnect', (reason) => {
       console.warn('🔴 [Socket] Desconectado del servidor:', reason);
+      if (reason === 'io server disconnect') {
+        socket.connect();
+      }
     });
 
     socket.on('connect_error', (err) => {
       console.warn('⚠️ [Socket] Error de conexión:', err.message);
     });
+  }
+
+  if (socket) {
+    socket.auth = {
+      token: localStorage.getItem('inventariosapp_token_v1'),
+      sessionCode: getActiveSessionCode()
+    };
   }
 
   return socket;
@@ -314,11 +339,19 @@ export function resetSocket() {
 }
 
 export function emitSessionJoin(sessionCode, userName) {
-  const s = getSocket();
   const cleanCode = String(sessionCode || '').trim().toUpperCase();
   setActiveSessionCode(cleanCode);
-  if (s && s.connected) {
-    s.emit('session:join', { sessionCode: cleanCode, userName });
+  const s = getSocket();
+  if (s) {
+    s.auth = {
+      token: localStorage.getItem('inventariosapp_token_v1'),
+      sessionCode: cleanCode
+    };
+    if (s.connected) {
+      s.emit('session:join', { sessionCode: cleanCode, userName });
+    } else {
+      s.connect();
+    }
   }
 }
 

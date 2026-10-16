@@ -23,6 +23,7 @@ import {
   CreditCard,
   DollarSign
 } from 'lucide-react';
+import { getSocket } from '../utils/socket';
 
 export default function Navbar({
   activeView,
@@ -141,13 +142,21 @@ export default function Navbar({
               {/* Real-time Collaboration Live Pill */}
               <button
                 type="button"
-                onClick={onOpenAuditorsModal}
-                className={`flex items-center gap-1 sm:gap-1.5 px-2 py-0.5 rounded-full text-[10px] sm:text-[11px] font-semibold border transition-all ${
+                onClick={() => {
+                  if (!isOnline) {
+                    try {
+                      const s = getSocket();
+                      if (s) s.connect();
+                    } catch {}
+                  }
+                  onOpenAuditorsModal();
+                }}
+                className={`flex items-center gap-1 sm:gap-1.5 px-2 py-0.5 rounded-full text-[10px] sm:text-[11px] font-semibold border transition-all cursor-pointer ${
                   isOnline
                     ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
-                    : 'bg-amber-50 text-amber-800 border-amber-200'
+                    : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
                 }`}
-                title="Haz clic para ver usuarios conectados en este conteo o cambiar tu nombre"
+                title={isOnline ? "En línea. Haz clic para ver usuarios conectados" : "Reconectando... Haz clic para reintentar conexión"}
               >
                 <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-amber-400'}`} />
                 <span className="hidden sm:inline">

@@ -123,6 +123,8 @@ const io = new Server(httpServer, {
     origin: '*',
     methods: ['GET', 'POST']
   },
+  pingInterval: 10000,
+  pingTimeout: 7000,
   maxHttpBufferSize: 1e8 // 100MB for catalog syncing
 });
 

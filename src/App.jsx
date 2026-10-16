@@ -361,8 +361,12 @@ export default function App() {
 
     const handleConnect = () => {
       setIsOnline(true);
-      if (currentUserName) {
-        emitSetAuditorName(currentUserName);
+      const activeCode = getActiveSessionCode();
+      const storedName = localStorage.getItem(LOCAL_STORAGE_USER_NAME) || currentUserName;
+      if (activeCode) {
+        emitSessionJoin(activeCode, storedName);
+      } else if (storedName) {
+        emitSetAuditorName(storedName);
       }
     };
 
@@ -433,11 +437,13 @@ export default function App() {
     };
 
     const handleUsersUpdate = (data) => {
+      setIsOnline(true);
       if (data.totalUsers !== undefined) setOnlineUsers(data.totalUsers);
       if (data.auditors) setAuditorsList(data.auditors);
     };
 
     const handleCountUpdated = (data) => {
+      setIsOnline(true);
       if (data.allCountedItems) {
         setCountedItems(data.allCountedItems);
       }
@@ -557,11 +563,55 @@ export default function App() {
     socket.on('catalog:updated', handleCatalogUpdated);
     socket.on('tunnel:updated', handleTunnelUpdated);
 
+    const handleReconnect = () => {
+      setIsOnline(true);
+      handleConnect();
+    };
+
+    if (socket.io) {
+      socket.io.on('reconnect', handleReconnect);
+    }
+
     if (socket.connected) {
       handleConnect();
     }
 
+    // Keep online state in sync and auto-reconnect if connection was dropped
+    const checkInterval = setInterval(() => {
+      if (socket.connected) {
+        setIsOnline(true);
+      } else if (!socket.connecting) {
+        socket.connect();
+      }
+    }, 2500);
+
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible') {
+        if (socket.connected) {
+          setIsOnline(true);
+          const activeCode = getActiveSessionCode();
+          const storedName = localStorage.getItem(LOCAL_STORAGE_USER_NAME) || currentUserName;
+          if (activeCode) {
+            emitSessionJoin(activeCode, storedName);
+          }
+        } else {
+          socket.connect();
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    window.addEventListener('online', handleConnect);
+
     return () => {
+      clearInterval(checkInterval);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      window.removeEventListener('online', handleConnect);
+      if (socket.io) {
+        socket.io.off('reconnect', handleReconnect);
+      }
       socket.off('connect', handleConnect);
       socket.off('disconnect', handleDisconnect);
       socket.off('sync:init', handleSyncInit);
