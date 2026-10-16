@@ -1146,7 +1146,7 @@ export default function App() {
       )}
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 space-y-4">
+      <main className="flex-1 max-w-7xl w-full mx-auto p-2.5 sm:p-6 space-y-3 sm:space-y-4">
         
         {/* VIEW 1: PASE DE INVENTARIO */}
         {activeView === 'inventory' && (

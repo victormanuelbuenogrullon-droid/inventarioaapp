@@ -170,18 +170,18 @@ export default function ScannerBar({
   };
 
   return (
-    <div className="bg-white border border-slate-200/90 rounded-2xl sm:rounded-3xl p-4 sm:p-5 shadow-sm shadow-slate-200/50 mt-1 sm:mt-2">
-      <div className="max-w-4xl mx-auto space-y-3.5">
+    <div className="bg-white border border-slate-200/90 rounded-2xl sm:rounded-3xl p-3 sm:p-5 shadow-sm shadow-slate-200/50 mt-1 sm:mt-2">
+      <div className="max-w-4xl mx-auto space-y-3 sm:space-y-3.5">
         
         {/* 1. HERO SCANNER: Unified Barcode & Name Search + Camera Button */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 sm:gap-3">
+        <div className="flex items-stretch gap-2 sm:gap-3">
           
           {/* Main Unified Input (Barcode OR Name Search with Live Suggestions) */}
-          <div ref={containerRef} className="flex-1 relative">
+          <div ref={containerRef} className="flex-1 min-w-0 relative">
             <form onSubmit={handleScanSubmit} className="relative flex items-center">
               {/* Barcode & Search Icon Badge */}
-              <div className="absolute left-3.5 sm:left-4 p-1.5 rounded-xl bg-indigo-50 border border-indigo-100 text-indigo-600 pointer-events-none flex items-center justify-center">
-                <Barcode className="w-6 h-6 sm:w-7 h-7" />
+              <div className="absolute left-2.5 sm:left-4 p-1 sm:p-1.5 rounded-xl bg-indigo-50 border border-indigo-100 text-indigo-600 pointer-events-none flex items-center justify-center">
+                <Barcode className="w-5 h-5 sm:w-7 sm:h-7" />
               </div>
 
               <input
@@ -190,15 +190,15 @@ export default function ScannerBar({
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Pasa la pistola lectora o escribe nombre, código o SKU..."
+                placeholder="Escanear o escribir nombre, código o SKU..."
                 disabled={isSearching}
                 autoComplete="off"
                 spellCheck="false"
-                className="w-full h-14 sm:h-16 pl-14 sm:pl-16 pr-28 sm:pr-32 bg-slate-50/70 hover:bg-slate-50 focus:bg-white text-slate-900 placeholder-slate-400 rounded-2xl border-2 border-slate-200 focus:border-indigo-600 focus:ring-4 focus:ring-indigo-500/15 focus:outline-none text-base sm:text-lg font-bold tracking-wide transition-all shadow-2xs"
+                className="w-full h-12 sm:h-16 pl-11 sm:pl-16 pr-20 sm:pr-32 bg-slate-50/70 hover:bg-slate-50 focus:bg-white text-slate-900 placeholder-slate-400 rounded-xl sm:rounded-2xl border-2 border-slate-200 focus:border-indigo-600 focus:ring-4 focus:ring-indigo-500/15 focus:outline-none text-sm sm:text-lg font-bold tracking-wide transition-all shadow-2xs"
               />
 
               {/* Right Buttons inside input: Clear & Buscar */}
-              <div className="absolute right-2.5 sm:right-3 flex items-center gap-1.5">
+              <div className="absolute right-1.5 sm:right-3 flex items-center gap-1 sm:gap-1.5">
                 {searchInput && (
                   <button
                     type="button"
@@ -208,18 +208,18 @@ export default function ScannerBar({
                       setShowSuggestions(false);
                       inputRef.current?.focus();
                     }}
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition-colors"
+                    className="p-1 sm:p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition-colors"
                     title="Limpiar campo"
                   >
-                    <X className="w-4 h-4" />
+                    <X className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                   </button>
                 )}
                 <button
                   type="submit"
                   disabled={!searchInput.trim() || isSearching}
-                  className="flex items-center gap-1.5 px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 active:bg-slate-950 text-white text-xs sm:text-sm font-bold transition-all disabled:opacity-30 disabled:cursor-not-allowed shadow-xs"
+                  className="flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-4 py-1.5 sm:py-2.5 rounded-lg sm:rounded-xl bg-slate-900 hover:bg-slate-800 active:bg-slate-950 text-white text-xs sm:text-sm font-bold transition-all disabled:opacity-30 disabled:cursor-not-allowed shadow-xs"
                 >
-                  <span>Buscar</span>
+                  <span className="hidden sm:inline">Buscar</span>
                   <CornerDownLeft className="w-3.5 h-3.5 text-slate-300" />
                 </button>
               </div>
@@ -296,27 +296,27 @@ export default function ScannerBar({
           <button
             type="button"
             onClick={onOpenCamScanner}
-            className="h-14 sm:h-16 px-5 sm:px-6 rounded-2xl bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 text-white font-bold text-sm sm:text-base shadow-sm shadow-indigo-600/25 flex items-center justify-center gap-2.5 transition-all active:scale-95 shrink-0"
+            className="h-12 sm:h-16 px-3.5 sm:px-6 rounded-xl sm:rounded-2xl bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 text-white font-bold text-xs sm:text-base shadow-sm shadow-indigo-600/25 flex items-center justify-center gap-1.5 sm:gap-2.5 transition-all active:scale-95 shrink-0"
             title="Abrir cámara del dispositivo para escanear códigos"
           >
-            <Camera className="w-5 h-5 sm:w-6 h-6 animate-pulse" />
+            <Camera className="w-4 h-4 sm:w-6 sm:h-6 animate-pulse" />
             <span>Cámara</span>
           </button>
 
         </div>
 
-        {/* 2. OPTIMIZED OPTIONS BAR (Cleaned up, no duplicate manual search button) */}
-        <div className="flex flex-wrap items-center justify-between gap-2.5 pt-1 border-t border-slate-100">
+        {/* 2. OPTIMIZED OPTIONS BAR */}
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-100">
           
           {/* Left Group: Scan Mode Switcher & Auto-reopen Camera */}
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
             
             {/* Mode Switcher Segmented Control */}
-            <div className="flex items-center p-1 bg-slate-100 rounded-xl border border-slate-200 shadow-2xs">
+            <div className="flex items-center p-0.5 sm:p-1 bg-slate-100 rounded-xl border border-slate-200 shadow-2xs">
               <button
                 type="button"
                 onClick={() => setScanMode('askQty')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                className={`flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[11px] sm:text-xs font-bold transition-all ${
                   scanMode === 'askQty'
                     ? 'bg-white text-indigo-700 shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
@@ -330,7 +330,7 @@ export default function ScannerBar({
               <button
                 type="button"
                 onClick={() => setScanMode('auto1')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                className={`flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[11px] sm:text-xs font-bold transition-all ${
                   scanMode === 'auto1'
                     ? 'bg-white text-amber-700 shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
@@ -347,16 +347,16 @@ export default function ScannerBar({
               <button
                 type="button"
                 onClick={() => setAutoReopenCamera(!autoReopenCamera)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all active:scale-95 shadow-2xs ${
+                className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-xl text-[11px] sm:text-xs font-bold border transition-all active:scale-95 shadow-2xs ${
                   autoReopenCamera
                     ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
                     : 'bg-slate-50 text-slate-500 border-slate-200 hover:text-slate-800'
                 }`}
                 title={autoReopenCamera ? 'Reapertura automática de cámara ACTIVADA tras ingresar cantidad' : 'Reapertura automática de cámara DESACTIVADA'}
               >
-                <RotateCcw className={`w-3.5 h-3.5 ${autoReopenCamera ? 'text-emerald-600' : 'text-slate-400'}`} />
-                <span>Auto-reabrir:</span>
-                <span className={`px-1.5 py-0.2 text-[10px] rounded-full font-extrabold uppercase ${
+                <RotateCcw className={`w-3 h-3 sm:w-3.5 sm:h-3.5 ${autoReopenCamera ? 'text-emerald-600' : 'text-slate-400'}`} />
+                <span className="hidden xs:inline">Auto-reabrir:</span>
+                <span className={`px-1.5 py-0.2 text-[9px] sm:text-[10px] rounded-full font-extrabold uppercase ${
                   autoReopenCamera ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-600'
                 }`}>
                   {autoReopenCamera ? 'ON' : 'OFF'}
@@ -371,11 +371,11 @@ export default function ScannerBar({
             <button
               type="button"
               onClick={() => onOpenGenericModal('')}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold transition-all shadow-2xs active:scale-95"
+              className="flex items-center gap-1.5 px-3 sm:px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-[11px] sm:text-xs font-bold transition-all shadow-2xs active:scale-95"
               title="Registrar un producto genérico o nuevo al vuelo"
             >
               <PlusCircle className="w-3.5 h-3.5 text-indigo-300" />
-              <span>+ Genérico / Nuevo</span>
+              <span>+ Genérico</span>
             </button>
           </div>
 

@@ -7,11 +7,11 @@ import { formatCurrency, formatNumber } from '../utils/export';
  */
 function getDynamicFontSize(valString) {
   const len = String(valString || '').length;
-  if (len > 16) return 'text-sm sm:text-base md:text-lg';
-  if (len > 13) return 'text-base sm:text-lg md:text-xl';
-  if (len > 10) return 'text-lg sm:text-xl md:text-2xl';
-  if (len > 7) return 'text-xl sm:text-2xl md:text-3xl';
-  return 'text-2xl sm:text-3xl';
+  if (len > 16) return 'text-xs sm:text-sm md:text-base';
+  if (len > 13) return 'text-sm sm:text-base md:text-lg';
+  if (len > 10) return 'text-base sm:text-lg md:text-xl';
+  if (len > 7) return 'text-lg sm:text-xl md:text-2xl';
+  return 'text-xl sm:text-2xl md:text-3xl';
 }
 
 export default function SummaryCards({ items }) {
@@ -44,10 +44,10 @@ export default function SummaryCards({ items }) {
   const strProfit = formatCurrency(potentialGrossProfit);
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4 my-4">
+    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-2.5 sm:gap-4 my-3 sm:my-4">
       
       {/* 1. SKUs Contados */}
-      <div className="min-w-0 bg-white border border-slate-200/90 rounded-2xl p-4 flex flex-col justify-between shadow-sm hover:border-slate-300 transition-all">
+      <div className="min-w-0 bg-white border border-slate-200/90 rounded-xl sm:rounded-2xl p-3 sm:p-4 flex flex-col justify-between shadow-xs hover:border-slate-300 transition-all">
         <div className="flex items-center justify-between">
           <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider truncate">SKUs Contados</span>
           <div className="p-2 rounded-xl bg-slate-100 text-slate-600 shrink-0 ml-1">
@@ -66,7 +66,7 @@ export default function SummaryCards({ items }) {
       </div>
 
       {/* 2. Unidades Físicas Contadas */}
-      <div className="min-w-0 bg-white border border-slate-200/90 rounded-2xl p-4 flex flex-col justify-between shadow-sm hover:border-slate-300 transition-all">
+      <div className="min-w-0 bg-white border border-slate-200/90 rounded-xl sm:rounded-2xl p-3 sm:p-4 flex flex-col justify-between shadow-xs hover:border-slate-300 transition-all">
         <div className="flex items-center justify-between">
           <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider truncate">Total Unidades</span>
           <div className="p-2 rounded-xl bg-slate-100 text-slate-600 shrink-0 ml-1">
@@ -85,7 +85,7 @@ export default function SummaryCards({ items }) {
       </div>
 
       {/* 3. Inversión Total Contada (Costo) */}
-      <div className="min-w-0 bg-white border border-emerald-200 rounded-2xl p-4 flex flex-col justify-between shadow-sm hover:border-emerald-300 transition-all ring-1 ring-emerald-100">
+      <div className="min-w-0 bg-white border border-emerald-200 rounded-xl sm:rounded-2xl p-3 sm:p-4 flex flex-col justify-between shadow-xs hover:border-emerald-300 transition-all ring-1 ring-emerald-100">
         <div className="flex items-center justify-between">
           <span className="text-xs font-bold text-emerald-800 uppercase tracking-wider truncate">Inversión Total</span>
           <div className="p-2 rounded-xl bg-emerald-50 text-emerald-700 shrink-0 ml-1">
@@ -104,7 +104,7 @@ export default function SummaryCards({ items }) {
       </div>
 
       {/* 4. Venta Total Contada (Precio) */}
-      <div className="min-w-0 bg-white border border-slate-200/90 rounded-2xl p-4 flex flex-col justify-between shadow-sm hover:border-slate-300 transition-all">
+      <div className="min-w-0 bg-white border border-slate-200/90 rounded-xl sm:rounded-2xl p-3 sm:p-4 flex flex-col justify-between shadow-xs hover:border-slate-300 transition-all">
         <div className="flex items-center justify-between">
           <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider truncate">Venta Total</span>
           <div className="p-2 rounded-xl bg-slate-100 text-slate-600 shrink-0 ml-1">
@@ -123,7 +123,7 @@ export default function SummaryCards({ items }) {
       </div>
 
       {/* 5. Margen / Ganancia Proyectada */}
-      <div className="min-w-0 col-span-2 sm:col-span-2 lg:col-span-1 bg-white border border-slate-200/90 rounded-2xl p-4 flex flex-col justify-between shadow-sm hover:border-slate-300 transition-all">
+      <div className="min-w-0 col-span-2 sm:col-span-2 lg:col-span-1 bg-white border border-slate-200/90 rounded-xl sm:rounded-2xl p-3 sm:p-4 flex flex-col justify-between shadow-xs hover:border-slate-300 transition-all">
         <div className="flex items-center justify-between">
           <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider truncate">Margen Estimado</span>
           <div className="flex items-center gap-1.5 shrink-0 ml-1">

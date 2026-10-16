@@ -82,7 +82,7 @@ export default function LoginView({ onLoginSuccess }) {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-950 flex flex-col justify-center items-center p-4 selection:bg-indigo-500 selection:text-white">
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-950 flex flex-col justify-center items-center p-3 sm:p-4 selection:bg-indigo-500 selection:text-white">
       
       {/* Decorative background glow */}
       <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
@@ -90,20 +90,20 @@ export default function LoginView({ onLoginSuccess }) {
       <div className="w-full max-w-md relative z-10 animate-in fade-in zoom-in-95 duration-300">
         
         {/* Brand Header */}
-        <div className="text-center mb-6">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 mb-3 border border-indigo-400/20">
-            <Barcode className="w-8 h-8" />
+        <div className="text-center mb-5 sm:mb-6">
+          <div className="inline-flex items-center justify-center w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 mb-2.5 sm:mb-3 border border-indigo-400/20">
+            <Barcode className="w-7 h-7 sm:w-8 sm:h-8" />
           </div>
-          <h1 className="text-2xl font-black text-white tracking-tight">
+          <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
             InventariosApp
           </h1>
-          <p className="text-xs text-slate-400 mt-1">
+          <p className="text-xs text-slate-400 mt-0.5 sm:mt-1">
             Sistema de Pase de Inventario Colaborativo en Tiempo Real
           </p>
         </div>
 
         {/* Login Card */}
-        <div className="bg-white/95 backdrop-blur-md border border-slate-100/20 rounded-2xl shadow-2xl p-6 sm:p-7">
+        <div className="bg-white/95 backdrop-blur-md border border-slate-100/20 rounded-2xl shadow-2xl p-4 sm:p-7">
           
           {/* Mode Switcher */}
           <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-100 rounded-xl mb-5 border border-slate-200">

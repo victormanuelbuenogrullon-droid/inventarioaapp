@@ -128,11 +128,11 @@ export default function ShareSessionModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs animate-in fade-in duration-200">
-      <div className="bg-white border border-slate-200 w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/50 backdrop-blur-xs animate-in fade-in duration-200">
+      <div className="bg-white border border-slate-200 w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh] animate-in zoom-in-95 duration-200">
         
         {/* Modal Header */}
-        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/70">
+        <div className="px-5 sm:px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/70 shrink-0">
           <div className="flex items-center gap-2.5">
             <div className="p-2 rounded-xl bg-slate-800 text-white shadow-xs">
               <QrCode className="w-5 h-5" />
@@ -153,11 +153,11 @@ export default function ShareSessionModal({
         </div>
 
         {/* Navigation Tabs */}
-        <div className="flex border-b border-slate-200 bg-slate-50/50 px-6 pt-2">
+        <div className="flex border-b border-slate-200 bg-slate-50/50 px-4 sm:px-6 pt-2 shrink-0 overflow-x-auto">
           <button
             type="button"
             onClick={() => setActiveTab('cloud')}
-            className={`flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold border-b-2 transition-all ${
+            className={`flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold border-b-2 transition-all whitespace-nowrap ${
               activeTab === 'cloud'
                 ? 'border-indigo-600 text-indigo-700 bg-white rounded-t-lg'
                 : 'border-transparent text-slate-600 hover:text-slate-900'
@@ -170,7 +170,7 @@ export default function ShareSessionModal({
           <button
             type="button"
             onClick={() => setActiveTab('wifi')}
-            className={`flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold border-b-2 transition-all ${
+            className={`flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold border-b-2 transition-all whitespace-nowrap ${
               activeTab === 'wifi'
                 ? 'border-emerald-600 text-emerald-700 bg-white rounded-t-lg'
                 : 'border-transparent text-slate-600 hover:text-slate-900'
@@ -184,10 +184,10 @@ export default function ShareSessionModal({
             <button
               type="button"
               onClick={() => setActiveTab('sync')}
-              className={`flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold border-b-2 transition-all ${
+              className={`flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold border-b-2 transition-all whitespace-nowrap ${
                 activeTab === 'sync'
                   ? 'border-amber-600 text-amber-700 bg-white rounded-t-lg'
-                  : 'border-transparent text-slate-600 hover:text-slate-900'
+                : 'border-transparent text-slate-600 hover:text-slate-900'
               }`}
             >
               <UploadCloud className="w-4 h-4 text-amber-500" />
@@ -197,7 +197,7 @@ export default function ShareSessionModal({
         </div>
 
         {/* Modal Body */}
-        <div className="p-6 space-y-4">
+        <div className="p-4 sm:p-6 space-y-4 flex-1 overflow-y-auto">
 
           {/* Session Code Card for Auxiliaries */}
           {activeSession?.code && (

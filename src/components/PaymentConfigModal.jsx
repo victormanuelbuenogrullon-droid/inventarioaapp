@@ -207,11 +207,11 @@ export default function PaymentConfigModal({ isOpen, onClose }) {
         </div>
 
         {/* Tab Switcher */}
-        <div className="flex border-b border-slate-200 bg-slate-50 px-4 pt-2 gap-2 shrink-0">
+        <div className="flex border-b border-slate-200 bg-slate-50 px-4 pt-2 gap-2 shrink-0 overflow-x-auto">
           <button
             type="button"
             onClick={() => setActiveTab('general')}
-            className={`py-2 px-3.5 text-xs font-bold rounded-t-xl transition-all border-b-2 flex items-center gap-1.5 ${
+            className={`py-2 px-3.5 text-xs font-bold rounded-t-xl transition-all border-b-2 flex items-center gap-1.5 whitespace-nowrap ${
               activeTab === 'general'
                 ? 'bg-white text-indigo-600 border-indigo-600 shadow-2xs'
                 : 'text-slate-500 border-transparent hover:text-slate-800'
@@ -224,7 +224,7 @@ export default function PaymentConfigModal({ isOpen, onClose }) {
           <button
             type="button"
             onClick={() => setActiveTab('banking')}
-            className={`py-2 px-3.5 text-xs font-bold rounded-t-xl transition-all border-b-2 flex items-center gap-1.5 ${
+            className={`py-2 px-3.5 text-xs font-bold rounded-t-xl transition-all border-b-2 flex items-center gap-1.5 whitespace-nowrap ${
               activeTab === 'banking'
                 ? 'bg-white text-indigo-600 border-indigo-600 shadow-2xs'
                 : 'text-slate-500 border-transparent hover:text-slate-800'
@@ -237,7 +237,7 @@ export default function PaymentConfigModal({ isOpen, onClose }) {
           <button
             type="button"
             onClick={() => setActiveTab('smtp')}
-            className={`py-2 px-3.5 text-xs font-bold rounded-t-xl transition-all border-b-2 flex items-center gap-1.5 ${
+            className={`py-2 px-3.5 text-xs font-bold rounded-t-xl transition-all border-b-2 flex items-center gap-1.5 whitespace-nowrap ${
               activeTab === 'smtp'
                 ? 'bg-white text-indigo-600 border-indigo-600 shadow-2xs'
                 : 'text-slate-500 border-transparent hover:text-slate-800'
